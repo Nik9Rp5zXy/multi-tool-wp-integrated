@@ -36,8 +36,13 @@ module.exports = {
                 throw new Error("Yakalama modülü başarıyla işledi ancak dosya diskte bulunamadı.");
             }
         } catch (error) {
-            console.error('İndirme modülü hatası:', error.message);
-            msg.reply('Video çekilemedi. Bağlantı gizli, korumalı veya izin verilen dosya boyutlarından çok daha büyük olabilir.');
+            console.error('İndirme modülü hatası (Tüm Detay):', error);
+            
+            let errMsg = error && error.message ? error.message : 'Bilinmeyen hata';
+            // Eğer "t" gibi anlamsız kısa hatalar alırsak veya başka şeyler patlarsa
+            if (errMsg === 't' || errMsg.length < 5) errMsg = 'Bağlantı desteklenmiyor veya sunucu zaman aşımına uğradı.';
+
+            msg.reply('Video çekilemedi. Bağlantı gizli, korumalı veya formata uygun değil olabilir.\n🔍 Hata detayı: ' + errMsg);
         } finally {
             cleanUp(outputPath); // WhatsApp'a aktarıldıktan sonra belleği korumak için silindi
         }
