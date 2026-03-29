@@ -30,8 +30,17 @@ module.exports = {
             });
 
             if (fs.existsSync(outputPath)) {
+                const stats = fs.statSync(outputPath);
+                const fileSizeInMB = stats.size / (1024 * 1024);
+                
                 const mediaObject = MessageMedia.fromFilePath(outputPath);
-                await client.sendMessage(msg.from, mediaObject, { caption: "İşte videonuz! 🎬" });
+                
+                if (fileSizeInMB > 15) {
+                    msg.reply(`⚠️ Video boyutu WhatsApp standart sınırını aşıyor (${fileSizeInMB.toFixed(1)} MB). Sorunsuz ulaşması için 'Belge' formatında gönderiliyor...`);
+                    await client.sendMessage(msg.from, mediaObject, { sendMediaAsDocument: true });
+                } else {
+                    await client.sendMessage(msg.from, mediaObject, { caption: "İşte videonuz! 🎬" });
+                }
             } else {
                 throw new Error("Yakalama modülü başarıyla işledi ancak dosya diskte bulunamadı.");
             }
