@@ -45,9 +45,9 @@ module.exports = {
                     .save(wavPath);
             });
 
-            // Whisper C++ ile analiz (tiny veya base modelini otomatik arayacaktır/çağıracaktır)
+            // Whisper C++ ile analiz
             const options = {
-                modelName: "tiny"
+                modelName: process.env.WHISPER_MODEL || "tiny"
             };
 
             const transcript = await whisper(wavPath, options);
