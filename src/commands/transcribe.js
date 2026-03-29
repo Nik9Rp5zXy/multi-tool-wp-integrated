@@ -66,6 +66,7 @@ module.exports = {
             // Whisper C++ ile analiz - Thread'in donmaması için shellOptions async:true
             const options = {
                 modelName: process.env.WHISPER_MODEL || "tiny",
+                whisperOptions: { language: 'auto' }, // Otomatik dil algılama (en yerine)
                 shellOptions: { async: true }
             };
 
