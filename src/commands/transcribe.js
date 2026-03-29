@@ -1,4 +1,4 @@
-const whisper = require('whisper-node');
+const { whisper } = require('whisper-node');
 const fs = require('fs');
 const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
