@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { ensureTempDir } = require('./src/utils/garbageCollector');
 const { isRateLimited } = require('./src/utils/rateLimiter');
-const { getNormalizedId } = require('./src/utils/idHelper');
+const { resolveUserId, resolveMentionedId } = require('./src/utils/idHelper');
 const { isBanned, isMuted } = require('./src/utils/auth');
 require('dotenv').config();
 
@@ -46,27 +46,36 @@ client.on('ready', () => {
 client.on('message', async msg => {
     try {
         const prefix = '.';
-        const senderId = getNormalizedId(msg);
+
+        // Resolve the real canonical user ID (handles group @lid vs DM @c.us)
+        const senderId = await resolveUserId(msg);
+
+        // Attach resolved ID and resolver function to message for use in commands
+        msg._normalizedUserId = senderId;
+        msg._resolveMentionedId = resolveMentionedId;
 
         // 1. Check if user is BANNED (Critical)
         if (isBanned(senderId)) return;
 
+        // Guard: media-only messages have no body
+        const body = msg.body || '';
+
         // 2. Check active session for document command before skipping prefix
         const docCommand = commands.get('document');
         if (docCommand && docCommand.isUserInSession && docCommand.isUserInSession(senderId)) {
-            if (!msg.body.startsWith(prefix)) {
+            if (!body.startsWith(prefix)) {
                 // 1.5 Check if user is MUTED (Only ignore if not prefix command)
                 if (isMuted(senderId)) return;
                 return await docCommand.execute(client, msg, []);
             }
         }
 
-        if (!msg.body.startsWith(prefix)) return;
+        if (!body.startsWith(prefix)) return;
         
         // 3. Check if user is MUTED (Ignore commands)
         if (isMuted(senderId)) return;
 
-        const args = msg.body.slice(prefix.length).trim().split(/ +/);
+        const args = body.slice(prefix.length).trim().split(/ +/);
         const commandName = args.shift().toLowerCase();
 
         if (commands.has(commandName)) {

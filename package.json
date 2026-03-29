@@ -1,12 +1,13 @@
 {
-  "name": "whatsapp-bot",
-  "version": "1.0.0",
-  "description": "",
+  "name": "multi-tool-wp-bot",
+  "version": "2.0.0",
+  "description": "Modüler WhatsApp botu — medya işleme, PDF oluşturma, video indirme, yapay zeka ses tanıma ve yetki yönetimi.",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": ["whatsapp", "bot", "multi-tool"],
   "author": "",
   "license": "ISC",
   "type": "commonjs",

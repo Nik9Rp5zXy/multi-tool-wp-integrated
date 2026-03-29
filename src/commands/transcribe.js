@@ -4,11 +4,11 @@ const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
 const { cleanUp } = require('../utils/garbageCollector');
 const { isAuthorized } = require('../utils/auth');
-const { getTargetMedia, getNormalizedId } = require('../utils/idHelper');
+const { getTargetMedia } = require('../utils/idHelper');
 
 module.exports = {
     execute: async (client, msg, args) => {
-        const senderId = getNormalizedId(msg);
+        const senderId = msg._normalizedUserId || require('../utils/idHelper').getNormalizedId(msg);
         if (!isAuthorized(senderId)) {
             return msg.reply('⛔ Yapay zeka ile ses metne dökme komutu için yetkiniz bulunmuyor.');
         }
@@ -46,7 +46,6 @@ module.exports = {
             });
 
             // Whisper C++ ile analiz (tiny veya base modelini otomatik arayacaktır/çağıracaktır)
-            // Model name parametresi "tiny" ya da yerelinizdeki model yoludur.
             const options = {
                 modelName: "tiny"
             };
@@ -55,7 +54,7 @@ module.exports = {
 
             // Whisper node array formatında cevap verir
             if (transcript && transcript.length > 0) {
-                 const fullText = transcript.map(t => t.text || t).join(' '); // Whisper API'sine bağlı olarak
+                 const fullText = transcript.map(t => t.text || t).join(' ');
                  msg.reply(`📝 *Deşifre Edildi:*\n\n${fullText.trim()}`);
             } else {
                  msg.reply('Seste anlaşılır bir diyalog bulunamadı.');

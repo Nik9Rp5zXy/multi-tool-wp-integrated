@@ -7,8 +7,10 @@ const { isAuthorized } = require('../utils/auth');
 
 module.exports = {
     execute: async (client, msg, args) => {
+        const senderId = msg._normalizedUserId || require('../utils/idHelper').getNormalizedId(msg);
+
         // Sistem Yükü Güvenliği: Ağır işlemi yetkilendir!
-        if (!isAuthorized(msg.from)) {
+        if (!isAuthorized(senderId)) {
             return msg.reply('⛔ Bu komutu kullanmaya yetkiniz bulunmamaktadır.');
         }
 

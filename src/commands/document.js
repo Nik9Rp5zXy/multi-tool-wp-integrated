@@ -3,7 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const { MessageMedia } = require('whatsapp-web.js');
 const { cleanUp } = require('../utils/garbageCollector');
-const { getNormalizedId, getTargetMedia } = require('../utils/idHelper');
 
 // Basit bellek yönetimi (Üretimde DB veya Redis kullanılması ölçeklenebilirlik açısından daha mantıklıdır)
 const memoryStore = new Map();
@@ -11,7 +10,7 @@ const memoryStore = new Map();
 module.exports = {
     execute: async (client, msg, args) => {
         const command = args[0] ? args[0].toLowerCase() : null;
-        const sender = getNormalizedId(msg);
+        const sender = msg._normalizedUserId || require('../utils/idHelper').getNormalizedId(msg);
 
         if (command === 'basla' || command === 'başla') {
             memoryStore.set(sender, []);
@@ -33,7 +32,7 @@ module.exports = {
 
             try {
                 for (let i = 0; i < images.length; i++) {
-                    const tempImgPath = path.join(__dirname, '../../temp', `temp_${sender}_${Date.now()}_${i}.jpg`);
+                    const tempImgPath = path.join(__dirname, '../../temp', `temp_${Date.now()}_${i}.jpg`);
                     fs.writeFileSync(tempImgPath, images[i], 'base64');
 
                     const img = doc.openImage(tempImgPath);
@@ -53,7 +52,7 @@ module.exports = {
             writeStream.on('finish', async () => {
                 try {
                     const pdfMedia = MessageMedia.fromFilePath(outputPath);
-                    await client.sendMessage(sender, pdfMedia, { sendMediaAsDocument: true, caption: '✅ PDF belgeniz hazır!' });
+                    await client.sendMessage(msg.from, pdfMedia, { sendMediaAsDocument: true, caption: '✅ PDF belgeniz hazır!' });
                 } catch (e) {
                     console.error('PDF iletilirken hata:', e);
                 } finally {

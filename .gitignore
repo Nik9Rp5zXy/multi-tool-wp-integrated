@@ -3,3 +3,8 @@ temp/
 .env
 .DS_Store
 *.log
+src/data/storage.json
+src/data/aliases.json
+.wwebjs_auth/
+.wwebjs_cache/
+crash_log.txt

@@ -1,5 +1,4 @@
 const os = require('os');
-const { getNormalizedId } = require('../utils/idHelper');
 const { isAuthorized } = require('../utils/auth');
 
 module.exports = {
@@ -13,12 +12,13 @@ module.exports = {
         if (uptimeSeconds < 60) uptimeStr = `${uptimeSeconds} saniye`;
         else uptimeStr = `${Math.floor(uptimeSeconds / 60)} dakika`;
 
+        const senderId = msg._normalizedUserId || require('../utils/idHelper').getNormalizedId(msg);
+
         let statusMsg = `📊 *Bot Sistem Durumu*\n\n`;
         statusMsg += `⏳ *Açık Kalma Süresi:* ${uptimeStr}\n`;
         statusMsg += `🧠 *Bot RAM Tüketimi:* ${memMb} MB\n`;
         statusMsg += `🖥 *Sunucu Boş RAM:* ${freeMem} MB / ${totalMem} MB\n`;
 
-        const senderId = getNormalizedId(msg);
         if (isAuthorized(senderId)) {
             statusMsg += `\n🛡 *Yetki:* Admin hesabı (Ses ve Video yetkisi açık)`;
         } else {
