@@ -5,6 +5,7 @@ const path = require('path');
 const { ensureTempDir } = require('./src/utils/garbageCollector');
 const { isRateLimited } = require('./src/utils/rateLimiter');
 const { getNormalizedId } = require('./src/utils/idHelper');
+const { isBanned, isMuted } = require('./src/utils/auth');
 require('dotenv').config();
 
 // Ensure the temp directory exists at startup
@@ -47,15 +48,23 @@ client.on('message', async msg => {
         const prefix = '.';
         const senderId = getNormalizedId(msg);
 
-        // Check active session for document command before skipping prefix
+        // 1. Check if user is BANNED (Critical)
+        if (isBanned(senderId)) return;
+
+        // 2. Check active session for document command before skipping prefix
         const docCommand = commands.get('document');
         if (docCommand && docCommand.isUserInSession && docCommand.isUserInSession(senderId)) {
             if (!msg.body.startsWith(prefix)) {
+                // 1.5 Check if user is MUTED (Only ignore if not prefix command)
+                if (isMuted(senderId)) return;
                 return await docCommand.execute(client, msg, []);
             }
         }
 
         if (!msg.body.startsWith(prefix)) return;
+        
+        // 3. Check if user is MUTED (Ignore commands)
+        if (isMuted(senderId)) return;
 
         const args = msg.body.slice(prefix.length).trim().split(/ +/);
         const commandName = args.shift().toLowerCase();
