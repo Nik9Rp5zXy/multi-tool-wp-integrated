@@ -93,10 +93,18 @@ module.exports = {
                await progressMsg.edit(`🎙 [${modeMessage}] Ses işleniyor... %100\n[▓▓▓▓▓▓▓▓▓▓]`);
             }
 
-            // Whisper node array formatında cevap verir
+            // Whisper node array formatında cevap verir ({start, end, speech})
             if (transcript && transcript.length > 0) {
-                 const fullText = transcript.map(t => t.text || t).join(' ');
-                 msg.reply(`📝 *Deşifre Edildi:*\n\n${fullText.trim()}`);
+                 const fullText = transcript.map(t => {
+                     let textPortion = t.speech || (typeof t === 'string' ? t : '');
+                     return textPortion.trim();
+                 }).filter(t => t.length > 0).join(' ');
+                 
+                 if (fullText.length > 0) {
+                     msg.reply(`📝 *Deşifre Edildi:*\n\n${fullText.trim()}`);
+                 } else {
+                     msg.reply('Seste anlaşılır bir diyalog veya duyulabilir bir insan sesi bulunamadı.');
+                 }
             } else {
                  msg.reply('Seste anlaşılır bir diyalog bulunamadı.');
             }
