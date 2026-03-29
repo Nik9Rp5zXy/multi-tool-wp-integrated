@@ -15,14 +15,28 @@ module.exports = {
 
         const media = await getTargetMedia(msg);
         if (!media) {
-            return msg.reply('Lütfen metne dökülecek sesli mesajı/videoyu gönderin veya ona yanıt vererek `.transcribe` yazın.');
+            return msg.reply('Lütfen metne dökülecek sesli mesajı/videoyu gönderin veya ona yanıt vererek komutu yazın.\n\n*İpucu:* Hız önceliği belirleyebilirsiniz:\n👉 `.transcribe hizli` (Saniyeler içinde, düşük analiz)\n👉 `.transcribe detayli` (Yüksek kalite, uzun bekleme)');
+        }
+
+        let selectedModel = process.env.WHISPER_MODEL || "small";
+        let modeMessage = "Standart Mod";
+
+        if (args && args[0]) {
+            const mode = args[0].toLowerCase();
+            if (mode === 'hizli' || mode === 'hızlı') {
+                selectedModel = "tiny"; // Maksimum hız, düşük RAM
+                modeMessage = "⚡ Hızlı Mod";
+            } else if (mode === 'yavas' || mode === 'yavaş' || mode === 'detayli' || mode === 'detaylı') {
+                selectedModel = "medium"; // Yüksek kalite, yüksek RAM
+                modeMessage = "🔍 Detaylı Mod";
+            }
         }
 
         let inputPath, wavPath;
         let progressInterval;
 
         try {
-            const progressMsg = await msg.reply('🎙 Ses işleniyor... %0\n[░░░░░░░░░░]');
+            const progressMsg = await msg.reply(`🎙 [${modeMessage}] Ses işleniyor... %0\n[░░░░░░░░░░]`);
             
             if (!media.mimetype.includes('audio') && !media.mimetype.includes('video')) {
                 return progressMsg.edit('Yapay zeka bu dosya aktarım biçimini kullanamaz. Lütfen ses dosyasına yanıt verin.');
@@ -58,14 +72,14 @@ module.exports = {
                 try {
                     // WhatsApp-web.js .edit() metodu (1.23+ sürümleri için aktif)
                     if (progressMsg.edit) {
-                        await progressMsg.edit(`🎙 Ses işleniyor... %${progress}\n[${bar}]`);
+                        await progressMsg.edit(`🎙 [${modeMessage}] Ses işleniyor... %${progress}\n[${bar}]`);
                     }
                 } catch (e) { /* ignore */ }
             }, 3500); // Her 3.5 saniyede bir %20 arttır
 
             // Whisper C++ ile analiz - Thread'in donmaması için shellOptions async:true
             const options = {
-                modelName: process.env.WHISPER_MODEL || "tiny",
+                modelName: selectedModel,
                 whisperOptions: { language: 'auto' }, // Otomatik dil algılama (en yerine)
                 shellOptions: { async: true }
             };
@@ -76,7 +90,7 @@ module.exports = {
             clearInterval(progressInterval);
             
             if (progressMsg.edit) {
-               await progressMsg.edit(`🎙 Ses işleniyor... %100\n[▓▓▓▓▓▓▓▓▓▓]`);
+               await progressMsg.edit(`🎙 [${modeMessage}] Ses işleniyor... %100\n[▓▓▓▓▓▓▓▓▓▓]`);
             }
 
             // Whisper node array formatında cevap verir
