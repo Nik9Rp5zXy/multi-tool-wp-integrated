@@ -1,18 +1,16 @@
 const { MessageMedia } = require('whatsapp-web.js');
+const { getTargetMedia } = require('../utils/idHelper');
 
 module.exports = {
     execute: async (client, msg, args) => {
-        if (!msg.hasMedia) {
-            return msg.reply('Lütfen sticker yapmak istediğiniz resmi, videoyu veya GIF dosyasını mesaja ekleyerek `.sticker` komutunu gönderin.');
-        }
-
         try {
-            msg.reply('Sticker oluşturuluyor, lütfen bekleyin... ⏳');
-            const media = await msg.downloadMedia();
+            const media = await getTargetMedia(msg);
             
             if (!media) {
-                return msg.reply('Medya başarılı bir şekilde indirilemedi.');
+                return msg.reply('Lütfen sticker yapmak istediğiniz resmi veya videoyu gönderin, ya da o mesaja yanıt vererek `.sticker` yazın.');
             }
+
+            msg.reply('Sticker oluşturuluyor, lütfen bekleyin... ⏳');
 
             // WhatsApp Web JS if system has FFmpeg, handles video to sticker implicitly.
             await client.sendMessage(msg.from, media, {

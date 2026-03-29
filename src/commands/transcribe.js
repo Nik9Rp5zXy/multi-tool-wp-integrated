@@ -4,24 +4,26 @@ const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
 const { cleanUp } = require('../utils/garbageCollector');
 const { isAuthorized } = require('../utils/auth');
+const { getTargetMedia, getNormalizedId } = require('../utils/idHelper');
 
 module.exports = {
     execute: async (client, msg, args) => {
-        if (!isAuthorized(msg.from)) {
+        const senderId = getNormalizedId(msg);
+        if (!isAuthorized(senderId)) {
             return msg.reply('⛔ Yapay zeka ile ses metne dökme komutu için yetkiniz bulunmuyor.');
         }
 
-        if (!msg.hasMedia) {
-            return msg.reply('Lütfen metne dökülecek sesli mesaja yanıt vererek `.transcribe` komutunu gönderin.');
+        const media = await getTargetMedia(msg);
+        if (!media) {
+            return msg.reply('Lütfen metne dökülecek sesli mesajı/videoyu gönderin veya ona yanıt vererek `.transcribe` yazın.');
         }
 
         let inputPath, wavPath;
 
         try {
             msg.reply('🎙 Ses işlenerek metne dönüştürülüyor... Bu işlem donanım gücüne dayalı (CPU) biraz sürebilir. ⏳');
-            const media = await msg.downloadMedia();
             
-            if (!media || (!media.mimetype.includes('audio') && !media.mimetype.includes('video'))) {
+            if (!media.mimetype.includes('audio') && !media.mimetype.includes('video')) {
                 return msg.reply('Yapay zeka bu dosya aktarım biçimini kullanamaz. Lütfen ses dosyasına yanıt verin.');
             }
 
@@ -46,8 +48,7 @@ module.exports = {
             // Whisper C++ ile analiz (tiny veya base modelini otomatik arayacaktır/çağıracaktır)
             // Model name parametresi "tiny" ya da yerelinizdeki model yoludur.
             const options = {
-                modelName: "tiny",
-                language: "tr"
+                modelName: "tiny"
             };
 
             const transcript = await whisper(wavPath, options);

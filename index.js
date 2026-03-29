@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { ensureTempDir } = require('./src/utils/garbageCollector');
 const { isRateLimited } = require('./src/utils/rateLimiter');
+const { getNormalizedId } = require('./src/utils/idHelper');
 require('dotenv').config();
 
 // Ensure the temp directory exists at startup
@@ -44,18 +45,29 @@ client.on('ready', () => {
 client.on('message', async msg => {
     try {
         const prefix = '.';
+        const senderId = getNormalizedId(msg);
+
+        // Check active session for document command before skipping prefix
+        const docCommand = commands.get('document');
+        if (docCommand && docCommand.isUserInSession && docCommand.isUserInSession(senderId)) {
+            if (!msg.body.startsWith(prefix)) {
+                return await docCommand.execute(client, msg, []);
+            }
+        }
+
         if (!msg.body.startsWith(prefix)) return;
 
         const args = msg.body.slice(prefix.length).trim().split(/ +/);
         const commandName = args.shift().toLowerCase();
 
         if (commands.has(commandName)) {
+            
             // Apply Rate Limiting
-            if (isRateLimited(msg.from)) {
+            if (isRateLimited(senderId)) {
                 return msg.reply('⏳ Dakikada en fazla 3 istek yapabilirsiniz. Lütfen biraz bekleyip tekrar deneyin.');
             }
 
-            console.log(`[ROUTE] Executing: ${commandName} -> User: ${msg.from}`);
+            console.log(`[ROUTE] Executing: ${commandName} -> User: ${senderId}`);
             const command = commands.get(commandName);
             await command.execute(client, msg, args);
         }

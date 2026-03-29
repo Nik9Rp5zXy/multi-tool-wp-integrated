@@ -2,11 +2,14 @@ const sharp = require('sharp');
 const path = require('path');
 const { MessageMedia } = require('whatsapp-web.js');
 const { cleanUp } = require('../utils/garbageCollector');
+const { getTargetMedia, getNormalizedId } = require('../utils/idHelper');
 
 module.exports = {
     execute: async (client, msg, args) => {
-        if (!msg.hasMedia) {
-            return msg.reply('Lütfen dönüştürülecek bir fotoğraf veya dosyayı mesaja ekleyerek `.format [png/jpg/webp]` komutunu kullanın.');
+        const media = await getTargetMedia(msg);
+        
+        if (!media) {
+            return msg.reply('Lütfen dönüştürülecek bir fotoğraf/dosya gönderin veya mesaja yanıt vererek `.format [png/jpg/webp]` komutunu kullanın.');
         }
 
         const targetFormat = args[0] ? args[0].toLowerCase() : 'png';
@@ -17,16 +20,6 @@ module.exports = {
         }
 
         msg.reply('Format dönüştürülüyor... ⏳');
-
-        let media;
-        try {
-            media = await msg.downloadMedia();
-        } catch (e) {
-            console.error(e);
-            return msg.reply('Medya indirilemedi.');
-        }
-
-        if (!media) return msg.reply('Medya içeriği boş.');
 
         // Yalnızca resimler üzerinde işlemi kısıtlama
         if (!media.mimetype.includes('image')) {

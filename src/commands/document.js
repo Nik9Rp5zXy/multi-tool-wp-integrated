@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { MessageMedia } = require('whatsapp-web.js');
 const { cleanUp } = require('../utils/garbageCollector');
+const { getNormalizedId, getTargetMedia } = require('../utils/idHelper');
 
 // Basit bellek yönetimi (Üretimde DB veya Redis kullanılması ölçeklenebilirlik açısından daha mantıklıdır)
 const memoryStore = new Map();
@@ -10,7 +11,7 @@ const memoryStore = new Map();
 module.exports = {
     execute: async (client, msg, args) => {
         const command = args[0] ? args[0].toLowerCase() : null;
-        const sender = msg.from;
+        const sender = getNormalizedId(msg);
 
         if (command === 'basla' || command === 'başla') {
             memoryStore.set(sender, []);
@@ -82,5 +83,6 @@ module.exports = {
         }
 
         return msg.reply('📝 *Kullanım Talimatı:*\n1. İşlemi başlatmak için: `.document basla`\n2. Fotoğrafları sırayla gönderin.\n3. Onaylamak için: `.document bitir`');
-    }
+    },
+    isUserInSession: (userId) => memoryStore.has(userId)
 };
