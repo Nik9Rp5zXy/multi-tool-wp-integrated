@@ -32,7 +32,12 @@ module.exports = {
 
             `━━━ 🔞 *YETİŞKİN* ━━━\n\n` +
 
-            `👉 *.adult [URL]*\nPornhub, xvideos, xhamster vb. sitelerden video akışını tespit eder ve indirip gönderir. Önce metadata gösterir (boyut, süre), sonra indirir.\n\n` +
+            `👉 *.adult [URL]* — Video indir (720p)\n` +
+            `👉 *.adult 480/1080 [URL]* — Kalite seçerek indir\n` +
+            `👉 *.adult bilgi [URL]* — Video bilgi kartı (süre, izlenme, kaliteler)\n` +
+            `👉 *.adult ses [URL]* — Sadece sesi MP3 olarak indir\n` +
+            `👉 *.adult ara [arama]* — Video arama\n` +
+            `👉 *.adult ara [site] [arama]* — Belirli sitede ara (xvideos, pornhub, xhamster)\n\n` +
 
             `━━━ 🎬 *MEDYA* ━━━\n\n` +
 
@@ -50,7 +55,7 @@ module.exports = {
 
             `👉 *.pdf [arama]*\nPDF döküman/kitap avcısı. İnternetten kazıyarak bulur.\n\n` +
 
-            `👉 *.ss [URL]*\nGizli proxy ile hedef sitenin ekran görüntüsünü çeker.\n\n` +
+            `👉 *.ss [URL]*\nAkıllı ekran görüntüsü. http/https, www, slash vb. hataları otomatik düzeltir — 8 kombinasyon dener. Tek mesajda canlı deneme logu. 🕵️\n\n` +
 
             `👉 *.ceviri [metin]*\nOtomatik dil algılamalı Türkçe'ye çeviri.\n\n` +
 
