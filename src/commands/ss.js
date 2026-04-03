@@ -41,6 +41,10 @@ async function captureScreenshot(url) {
     if (!media || !media.data || media.data.length < 100) {
         throw new Error('Boş veya geçersiz görüntü (site muhtemelen boş sayfa döndürdü)');
     }
+    // MIME'ı her zaman image/png olarak zorla — bazı siteler
+    // yanlış MIME döndürünce WhatsApp dosya olarak gönderiyor
+    media.mimetype = 'image/png';
+    media.filename = 'screenshot.png';
     return media;
 }
 
