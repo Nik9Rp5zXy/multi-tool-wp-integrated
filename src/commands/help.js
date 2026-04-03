@@ -62,6 +62,10 @@ module.exports = {
             `━━━ ⚙️ *SİSTEM* ━━━\n\n` +
 
             `👉 *.status* — Bot sistem durumu\n\n` +
+            `👉 *.ownermode [ac/kapat]* — Bot\'u sadece kurucuya kilitle (Owner)\n\n` +
+            `👉 *.ayar* — Bot ayarlarını listele ve değiştir (Admin/Owner)\n` +
+            `_Ayarlar: rateLimit, rateLimitWindow, whisperModel, maxDownloadMB, prefix..._\n` +
+            `_Örnek: \`.ayar rateLimit 10\` • \`.ayar whisperModel medium\` • \`.ayar sifirla hepsi\`_\n\n` +
             `👉 *.ban [@kişi / liste]* — Kullanıcı yasaklama. (Owner)\n` +
             `_Alt komutlar: \`.ban liste\` — yasaklıları göster_\n\n` +
             `👉 *.unban [@kişi]* — Yasak kaldırma (Owner)\n\n` +
