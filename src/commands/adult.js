@@ -1,6 +1,8 @@
 const ytDlp = require('yt-dlp-exec');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios');
+const cheerio = require('cheerio');
 const { MessageMedia } = require('whatsapp-web.js');
 const { cleanUp } = require('../utils/garbageCollector');
 
@@ -11,13 +13,6 @@ const SUPPORTED_SITES = [
     'eporner', 'txxx', 'hclips', 'drtuber', 'nuvid',
     'tnaflix', 'fuq', 'empflix', 'porntrex', 'xmegadrive'
 ];
-
-// Arama destekleyen siteler (yt-dlp search prefix'i)
-const SEARCH_SUPPORTED = {
-    'xvideos': 'xvsearch',
-    'pornhub': 'phsearch',
-    'xhamster': 'xhsearch',
-};
 
 function isAdultUrl(url) {
     try {
@@ -41,13 +36,17 @@ function formatDuration(seconds) {
     return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+const HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept-Language': 'en-US,en;q=0.9'
+};
+
 // ── Alt komut: video bilgisi ─────────────────────────────────────────────────
 async function handleInfo(client, msg, url, waitMsg) {
     try {
         const info = await ytDlp(url, {
             dumpSingleJson: true,
             noWarnings: true,
-            noCallHome: true,
         });
 
         const title = info.title || 'Bilinmiyor';
@@ -61,7 +60,6 @@ async function handleInfo(client, msg, url, waitMsg) {
 
         const estimatedSize = info.filesize || info.filesize_approx || 0;
 
-        // Mevcut formatları listele
         const formats = (info.formats || [])
             .filter(f => f.height && f.ext === 'mp4')
             .map(f => `${f.height}p`)
@@ -108,14 +106,12 @@ async function handleAudio(client, msg, url, waitMsg) {
             audioFormat: 'mp3',
             audioQuality: '192K',
             noWarnings: true,
-            noCallHome: true,
         });
 
-        // yt-dlp bazen .mp3.mp3 yapar veya farklı isimlendirir — bul
+        // yt-dlp bazen farklı isimlendirir
         let finalPath = outputPath;
         if (!fs.existsSync(outputPath)) {
             const tempDir = path.dirname(outputPath);
-            const base = path.basename(outputPath, '.mp3');
             const files = fs.readdirSync(tempDir).filter(f => f.startsWith(`adult_audio_${timestamp}`));
             if (files.length > 0) finalPath = path.join(tempDir, files[0]);
             else throw new Error('Ses dosyası diske kaydedilemedi.');
@@ -144,10 +140,9 @@ async function handleDownload(client, msg, url, quality, waitMsg) {
     const outputPath = path.join(__dirname, '../../temp', `adult_${timestamp}.mp4`);
 
     try {
-        // Meta bilgisi önce
         let videoInfo;
         try {
-            videoInfo = await ytDlp(url, { dumpSingleJson: true, noWarnings: true, noCallHome: true });
+            videoInfo = await ytDlp(url, { dumpSingleJson: true, noWarnings: true });
         } catch {
             throw new Error('Video linki geçersiz veya site erişimi engellendi.');
         }
@@ -164,14 +159,12 @@ async function handleDownload(client, msg, url, quality, waitMsg) {
             );
         }
 
-        // Kalite seçimi
         let formatStr;
         if (quality === '480') {
             formatStr = 'bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/best[ext=mp4][height<=480]/best[height<=480]/best';
         } else if (quality === '1080') {
             formatStr = 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best';
         } else {
-            // Varsayılan: 720p
             formatStr = 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best[height<=720]/best';
         }
 
@@ -187,7 +180,6 @@ async function handleDownload(client, msg, url, quality, waitMsg) {
             output: outputPath,
             format: formatStr,
             noWarnings: true,
-            noCallHome: true,
             mergeOutputFormat: 'mp4'
         });
 
@@ -220,55 +212,89 @@ async function handleDownload(client, msg, url, quality, waitMsg) {
     }
 }
 
-// ── Alt komut: arama ─────────────────────────────────────────────────────────
+// ── Alt komut: arama (web scraping — yt-dlp search desteği kaldırıldı) ───────
 async function handleSearch(client, msg, args, waitMsg) {
-    // .adult ara [site] [arama terimi]
-    // .adult ara xvideos türk
-    const site = args[0] && SEARCH_SUPPORTED[args[0].toLowerCase()] ? args[0].toLowerCase() : null;
+    const SEARCH_SITES = {
+        'xvideos': { url: 'https://www.xvideos.com/?k=', baseUrl: 'https://www.xvideos.com' },
+        'xnxx': { url: 'https://www.xnxx.com/search/', baseUrl: 'https://www.xnxx.com' },
+    };
+
+    const site = args[0] && SEARCH_SITES[args[0].toLowerCase()] ? args[0].toLowerCase() : null;
     const query = site ? args.slice(1).join(' ') : args.join(' ');
-    const searchPrefix = site ? SEARCH_SUPPORTED[site] : 'xvsearch'; // default xvideos
+    const selectedSite = site || 'xvideos';
+    const siteConfig = SEARCH_SITES[selectedSite];
 
     if (!query) {
         return await waitMsg.edit(
             '🔍 *Yetişkin Video Arama*\n\n' +
-            'Kullanım: `.adult ara [site] [arama terimi]`\n\n' +
+            'Kullanım: `.adult ara [arama terimi]`\n\n' +
             'Örnek:\n' +
-            '• `.adult ara türk amatör`\n' +
-            '• `.adult ara xvideos komedi`\n' +
-            '• `.adult ara pornhub amateur`\n\n' +
-            `📌 Site belirtilmezse xvideos'ta aranır.`
+            '• `.adult ara türk`\n' +
+            '• `.adult ara xvideos amateur`\n' +
+            '• `.adult ara xnxx popular`\n\n' +
+            `📌 Desteklenen arama siteleri: ${Object.keys(SEARCH_SITES).join(', ')}`
         );
     }
 
     try {
-        await waitMsg.edit(`🔍 "${query}" aranıyor${site ? ` (${site})` : ''}...\n⏳ Sonuçlar geliyor...`);
+        await waitMsg.edit(`🔍 "${query}" aranıyor (${selectedSite})...\n⏳ Sonuçlar kazınıyor...`);
 
-        // yt-dlp search: "xvsearch5:kelime" = 5 sonuç
-        const results = await ytDlp(`${searchPrefix}5:${query}`, {
-            dumpSingleJson: true,
-            flatPlaylist: true,
-            noWarnings: true,
-            noCallHome: true,
+        const searchUrl = `${siteConfig.url}${encodeURIComponent(query)}`;
+
+        const res = await axios.get(searchUrl, {
+            headers: HEADERS,
+            timeout: 12000
         });
 
-        // Sonuç formatı: tek video veya playlist
-        const entries = results.entries || (results.id ? [results] : []);
+        const $ = cheerio.load(res.data);
+        const results = [];
 
-        if (!entries || entries.length === 0) {
-            return await waitMsg.edit(`🔍 "${query}" için sonuç bulunamadı.`);
+        if (selectedSite === 'xvideos') {
+            // xvideos arama sonuçları
+            $('.mozaique .thumb-block').each((i, el) => {
+                if (results.length >= 5) return false;
+                const titleEl = $(el).find('.thumb-under .title a');
+                const durationEl = $(el).find('.duration');
+                const title = titleEl.attr('title') || titleEl.text().trim();
+                let href = titleEl.attr('href') || '';
+                if (href && !href.startsWith('http')) href = siteConfig.baseUrl + href;
+                const duration = durationEl.text().trim();
+
+                if (title && href) {
+                    results.push({ title, url: href, duration: duration || '?' });
+                }
+            });
+        } else if (selectedSite === 'xnxx') {
+            // xnxx arama sonuçları
+            $('.mozaique .thumb-block').each((i, el) => {
+                if (results.length >= 5) return false;
+                const titleEl = $(el).find('.thumb-under p a');
+                const durationEl = $(el).find('.metadata .duration, .thumb-under .metadata');
+                const title = titleEl.attr('title') || titleEl.text().trim();
+                let href = titleEl.attr('href') || '';
+                if (href && !href.startsWith('http')) href = siteConfig.baseUrl + href;
+                const duration = durationEl.text().trim();
+
+                if (title && href) {
+                    results.push({ title, url: href, duration: duration || '?' });
+                }
+            });
+        }
+
+        if (results.length === 0) {
+            return await waitMsg.edit(
+                `🔍 "${query}" için sonuç bulunamadı.\n\n` +
+                `💡 Farklı arama terimi veya site deneyin.`
+            );
         }
 
         let text = `🔍 *Arama: "${query.substring(0, 40)}"*\n`;
-        text += site ? `📌 Site: ${site}\n` : '';
-        text += `📊 ${entries.length} sonuç bulundu\n\n`;
+        text += `📌 Site: ${selectedSite} | ${results.length} sonuç\n\n`;
 
-        entries.slice(0, 5).forEach((entry, i) => {
-            const t = entry.title || 'Başlıksız';
-            const dur = formatDuration(entry.duration);
-            const url = entry.webpage_url || entry.url || '';
-            text += `*${i + 1}.* ${t.substring(0, 55)}${t.length > 55 ? '...' : ''}\n`;
-            text += `   ⏱️ ${dur}\n`;
-            text += `   🔗 ${url}\n\n`;
+        results.forEach((r, i) => {
+            text += `*${i + 1}.* ${r.title.substring(0, 55)}${r.title.length > 55 ? '...' : ''}\n`;
+            text += `   ⏱️ ${r.duration}\n`;
+            text += `   🔗 ${r.url}\n\n`;
         });
 
         text += `💡 İndirmek için: \`.adult [URL]\``;
@@ -277,9 +303,8 @@ async function handleSearch(client, msg, args, waitMsg) {
     } catch (err) {
         console.error('[Adult Search] Hata:', err.message);
         await waitMsg.edit(
-            `⛔ Arama başarısız.\n` +
-            `🔍 Hata: ${err.message.substring(0, 100)}\n\n` +
-            `💡 Başka bir site veya arama terimi deneyin.`
+            `⛔ Arama başarısız.\n🔍 Hata: ${err.message.substring(0, 100)}\n\n` +
+            `💡 Farklı arama terimi deneyin.`
         );
     }
 }
@@ -289,7 +314,6 @@ module.exports = {
     execute: async (client, msg, args) => {
         const subCmd = args[0] ? args[0].toLowerCase() : '';
 
-        // ── Yardım / Komut yok ───────────────────────────────────────────
         if (!subCmd) {
             return msg.reply(
                 '🔞 *Yetişkin Araç Kutusu*\n\n' +
@@ -298,23 +322,21 @@ module.exports = {
                 '• `.adult 480 [URL]` — Düşük kalite (480p)\n' +
                 '• `.adult 1080 [URL]` — Yüksek kalite (1080p)\n\n' +
                 '*Araçlar:*\n' +
-                '• `.adult bilgi [URL]` — Video bilgi kartı (süre, izlenme, kaliteler)\n' +
+                '• `.adult bilgi [URL]` — Video bilgi kartı\n' +
                 '• `.adult ses [URL]` — Sadece sesi MP3 olarak indir\n' +
                 '• `.adult ara [arama]` — Video arama (xvideos)\n' +
-                '• `.adult ara [site] [arama]` — Belirli sitede ara\n\n' +
+                '• `.adult ara xnxx [arama]` — xnxx\'te ara\n\n' +
                 '*📌 Desteklenen Siteler:*\n' +
                 SUPPORTED_SITES.slice(0, 10).map(s => `• ${s}.com`).join('\n') +
                 `\n• ...ve ${SUPPORTED_SITES.length - 10} daha`
             );
         }
 
-        // ── Alt komutları yakala ─────────────────────────────────────────
-
         // .adult bilgi [url]
         if (subCmd === 'bilgi' || subCmd === 'info') {
             const url = args[1];
             if (!url || !isAdultUrl(url)) {
-                return msg.reply('Lütfen geçerli bir desteklenen site URL\'si girin.\nÖrnek: `.adult bilgi https://xvideos.com/video...`');
+                return msg.reply('Lütfen geçerli bir URL girin.\nÖrnek: `.adult bilgi https://xvideos.com/video...`');
             }
             const waitMsg = await msg.reply('🔍 Video bilgisi çekiliyor...');
             return handleInfo(client, msg, url, waitMsg);
@@ -324,19 +346,19 @@ module.exports = {
         if (subCmd === 'ses' || subCmd === 'audio' || subCmd === 'mp3') {
             const url = args[1];
             if (!url || !isAdultUrl(url)) {
-                return msg.reply('Lütfen geçerli bir site URL\'si girin.\nÖrnek: `.adult ses https://xvideos.com/video...`');
+                return msg.reply('Lütfen geçerli bir URL girin.\nÖrnek: `.adult ses https://xvideos.com/video...`');
             }
             const waitMsg = await msg.reply('🎵 Ses çıkarma başlatıldı...');
             return handleAudio(client, msg, url, waitMsg);
         }
 
-        // .adult ara [...arama]
+        // .adult ara [...]
         if (subCmd === 'ara' || subCmd === 'search') {
             const waitMsg = await msg.reply('🔍 Arama başlatılıyor...');
             return handleSearch(client, msg, args.slice(1), waitMsg);
         }
 
-        // .adult 480 [url] veya .adult 1080 [url]
+        // .adult 480/720/1080 [url]
         if (['480', '720', '1080'].includes(subCmd)) {
             const url = args[1];
             if (!url || !isAdultUrl(url)) {
@@ -346,22 +368,17 @@ module.exports = {
             return handleDownload(client, msg, url, subCmd, waitMsg);
         }
 
-        // .adult [url] — direkt indirme (varsayılan 720p)
+        // .adult [url] — direkt indirme
         const url = args[0];
         if (url && url.startsWith('http') && isAdultUrl(url)) {
             const waitMsg = await msg.reply('🔞 Video analiz ediliyor...');
             return handleDownload(client, msg, url, '720', waitMsg);
         }
 
-        // Desteklenmeyen site veya hatalı kullanım
         if (url && url.startsWith('http') && !isAdultUrl(url)) {
-            return msg.reply(
-                '⛔ Bu site desteklenmiyor.\n\n' +
-                '💡 Desteklenen siteler için `.adult` yazın.'
-            );
+            return msg.reply('⛔ Bu site desteklenmiyor.\n💡 Desteklenen siteler için `.adult` yazın.');
         }
 
-        // Bilinmeyen komut
         msg.reply('❓ Bilinmeyen komut. Kullanım için `.adult` yazın.');
     }
 };
