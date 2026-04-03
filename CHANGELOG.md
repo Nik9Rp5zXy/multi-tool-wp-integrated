@@ -2,6 +2,38 @@
 
 Botun gelişimi ve eklenen özelliklerin özeti:
 
+## [3.0.0] - 3 Nisan 2026
+
+### 🚀 Major Release — 12 Yeni Tool Eklendi
+
+Tüm yeni araçlar **API key gerektirmez**. Ücretsiz ve açık kaynak API'ler kullanılmıştır.
+
+#### 🛠️ Yeni Araçlar
+- **`.qr`** — QR kod oluşturucu. Metin, URL veya WiFi bilgisinden QR kod resmi üretir.
+- **`.kur`** — Anlık döviz ve kripto para kuru sorgulama + çevirici. USD/EUR/GBP/BTC/ETH/SOL.
+- **`.hava`** — Hava durumu (wttr.in) + 3 günlük tahmin. Sıcaklık, nem, rüzgar, UV indeksi.
+- **`.kisalt`** — URL kısaltıcı (TinyURL). Uzun linkleri kısa forma dönüştürür.
+- **`.sozluk`** — TDK resmi sözlük sorgulama. Anlam, köken, örnek cümle, atasözü/deyim.
+- **`.hesapla`** — Gelişmiş hesap makinesi (mathjs). Trigonometri, birim dönüştürme, yüzde hesaplama.
+- **`.whois`** — Domain DNS kayıtları + IP geolokasyon (ip-api.com). Admin yetkisi gerektirir.
+- **`.hash`** — MD5/SHA1/SHA256/SHA512 hash üretimi, Base64 encode/decode, güvenli şifre/PIN üretici.
+- **`.renk`** — Renk önizleme kartı oluşturucu. HEX, RGB, HSL bilgisi + zıt renk. Türkçe renk isimleri desteklenir.
+- **`.ping`** — Sunucu erişilebilirlik testi. HTTP yanıt süresi, status kodu, SSL durumu. Admin yetkisi gerektirir.
+- **`.ocr`** — Resimdeki yazıyı AI ile okuma (tesseract.js). Türkçe + İngilizce dil desteği.
+- **`.takvim`** — Tarih araçları: bugün bilgisi + hicri takvim, tarih farkı hesaplama, geri sayım, epoch çözümleme.
+
+#### 📦 Yeni Bağımlılıklar
+- `qrcode` — QR kod üretimi
+- `mathjs` — Gelişmiş matematik hesaplama
+- `tesseract.js` — Yapay zeka OCR motoru
+
+#### 📝 Güncellenenler
+- **help.js** — Kategorize edilmiş yeni yardım menüsü (Araçlar, Ağ, Medya, Araştırma, Sistem).
+- **README.md** — Tam olarak yeniden yazıldı. Tüm 28 komut dokümante edildi.
+- **package.json** — v3.0.0, yeni bağımlılıklar eklendi.
+
+---
+
 ## [2.0.0] - 30 Mart 2026
 
 ### 🔧 Major Fix — ID Linking Sistemi

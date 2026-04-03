@@ -1,7 +1,7 @@
 {
   "name": "multi-tool-wp-bot",
-  "version": "2.0.0",
-  "description": "Modüler WhatsApp botu — medya işleme, PDF oluşturma, video indirme, yapay zeka ses tanıma ve yetki yönetimi.",
+  "version": "3.0.0",
+  "description": "Modüler WhatsApp botu — 28+ araç: medya dönüştürme, QR kod, döviz kuru, hava durumu, OCR, sözlük, hesap makinesi, hash, PDF oluşturucu ve daha fazlası.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -10,7 +10,11 @@
   "keywords": [
     "whatsapp",
     "bot",
-    "multi-tool"
+    "multi-tool",
+    "qrcode",
+    "ocr",
+    "currency",
+    "weather"
   ],
   "author": "",
   "license": "ISC",
@@ -21,9 +25,12 @@
     "cheerio": "^1.2.0",
     "dotenv": "^17.3.1",
     "fluent-ffmpeg": "^2.1.3",
+    "mathjs": "^14.0.1",
     "pdfkit": "^0.18.0",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "sharp": "^0.34.5",
+    "tesseract.js": "^6.0.1",
     "whatsapp-web.js": "^1.34.6",
     "whisper-node": "^1.1.1",
     "yt-dlp-exec": "^1.0.2"
