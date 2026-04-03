@@ -1,384 +1,489 @@
-const ytDlp = require('yt-dlp-exec');
-const path = require('path');
-const fs = require('fs');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const path = require('path');
+const fs = require('fs');
 const { MessageMedia } = require('whatsapp-web.js');
 const { cleanUp } = require('../utils/garbageCollector');
 
-// ── Desteklenen siteler ──────────────────────────────────────────────────────
+// ── Sabitler ─────────────────────────────────────────────────────────────────
+const HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+};
+
 const SUPPORTED_SITES = [
-    'pornhub', 'xvideos', 'xhamster', 'redtube', 'youporn',
-    'tube8', 'xnxx', 'spankbang', 'beeg', 'ixxx',
-    'eporner', 'txxx', 'hclips', 'drtuber', 'nuvid',
-    'tnaflix', 'fuq', 'empflix', 'porntrex', 'xmegadrive'
+    'xvideos', 'xnxx', 'pornhub', 'xhamster', 'redtube',
+    'youporn', 'tube8', 'spankbang', 'eporner', 'beeg'
 ];
 
-function isAdultUrl(url) {
-    try {
-        const hostname = new URL(url).hostname.replace('www.', '');
-        return SUPPORTED_SITES.some(site => hostname.includes(site));
-    } catch { return false; }
-}
-
 function formatSize(bytes) {
-    if (!bytes) return 'Bilinmiyor';
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (!bytes) return '?';
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function detectSite(url) {
+    try {
+        const hostname = new URL(url).hostname.replace('www.', '');
+        return SUPPORTED_SITES.find(s => hostname.includes(s)) || null;
+    } catch { return null; }
+}
+
+// ── Site Scraper'ları ────────────────────────────────────────────────────────
+
+// XVIDEOS & XNXX (aynı altyapı)
+async function scrapeXvideos(url) {
+    const { data: html } = await axios.get(url, { headers: HEADERS, timeout: 12000 });
+
+    const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
+    const cleanTitle = title.replace(/ - XVIDEOS\.COM| - XNXX\.COM/gi, '').trim();
+
+    // Video URL'leri script tag'lerinden çıkar
+    const highUrl = (html.match(/html5player\.setVideoUrlHigh\('([^']+)'\)/i) || [])[1];
+    const lowUrl = (html.match(/html5player\.setVideoUrlLow\('([^']+)'\)/i) || [])[1];
+    const hlsUrl = (html.match(/html5player\.setVideoHLS\('([^']+)'\)/i) || [])[1];
+
+    // Süre
+    const durationMatch = html.match(/html5player\.setVideoDuration\((\d+)\)/i) || html.match(/"duration"\s*:\s*(\d+)/);
+    const duration = durationMatch ? parseInt(durationMatch[1]) : 0;
+
+    const videoUrl = highUrl || lowUrl;
+    if (!videoUrl) throw new Error('Video akışı bulunamadı (site yapısı değişmiş olabilir)');
+
+    return { title: cleanTitle, videoUrl, duration, site: 'xvideos' };
+}
+
+// PORNHUB
+async function scrapePornhub(url) {
+    const { data: html } = await axios.get(url, { headers: { ...HEADERS, Cookie: 'accessAgeDisclaimerPH=1' }, timeout: 12000 });
+
+    const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
+    const cleanTitle = title.replace(/ - Pornhub\.com/gi, '').trim();
+
+    // flashvars veya mediaDefinitions'dan URL çıkar
+    let videoUrl = null;
+
+    // Yöntem 1: mediaDefinitions JSON
+    const mediaMatch = html.match(/var\s+flashvars_\d+\s*=\s*(\{[\s\S]*?\});/);
+    if (mediaMatch) {
+        try {
+            const flashvars = JSON.parse(mediaMatch[1]);
+            const mediaDefs = flashvars.mediaDefinitions || [];
+            // En yüksek kaliteyi bul (mp4 olanları filtrele, HLS değil)
+            const mp4s = mediaDefs
+                .filter(m => m.format === 'mp4' && m.videoUrl && !m.videoUrl.includes('.m3u8'))
+                .sort((a, b) => (b.quality || 0) - (a.quality || 0));
+            if (mp4s.length > 0) videoUrl = mp4s[0].videoUrl;
+        } catch {}
+    }
+
+    // Yöntem 2: quality_ değişkenlerinden
+    if (!videoUrl) {
+        const q720 = (html.match(/quality_720p\s*=\s*'([^']+)'/i) || [])[1];
+        const q480 = (html.match(/quality_480p\s*=\s*'([^']+)'/i) || [])[1];
+        const q240 = (html.match(/quality_240p\s*=\s*'([^']+)'/i) || [])[1];
+        videoUrl = q720 || q480 || q240;
+    }
+
+    // Süre
+    const durationMatch = html.match(/"duration"\s*:\s*"?(\d+)"?/);
+    const duration = durationMatch ? parseInt(durationMatch[1]) : 0;
+
+    if (!videoUrl) throw new Error('Pornhub video URL çıkarılamadı (giriş/yaş doğrulama engelliyor olabilir)');
+
+    return { title: cleanTitle, videoUrl, duration, site: 'pornhub' };
+}
+
+// XHAMSTER
+async function scrapeXhamster(url) {
+    const { data: html } = await axios.get(url, { headers: HEADERS, timeout: 12000 });
+
+    const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
+    const cleanTitle = title.replace(/ - xHamster\.com/gi, '').trim();
+
+    // initials JSON'dan video URL çıkar
+    let videoUrl = null;
+    const initialsMatch = html.match(/window\.initials\s*=\s*(\{[\s\S]*?\});\s*<\/script>/);
+    if (initialsMatch) {
+        try {
+            const initials = JSON.parse(initialsMatch[1]);
+            const sources = initials?.videoModel?.sources?.mp4 || initials?.xplayerSettings?.sources?.mp4 || {};
+            // En yüksek kalite
+            const qualities = Object.entries(sources).sort((a, b) => parseInt(b[0]) - parseInt(a[0]));
+            if (qualities.length > 0) videoUrl = qualities[0][1];
+        } catch {}
+    }
+
+    // Yedek: mp4 URL regex
+    if (!videoUrl) {
+        const mp4Match = html.match(/"(https?:\/\/[^"]+\.mp4[^"]*)"/) ||
+                          html.match(/'(https?:\/\/[^']+\.mp4[^']*)'/);
+        if (mp4Match) videoUrl = mp4Match[1];
+    }
+
+    const durationMatch = html.match(/"duration"\s*:\s*"?(\d+)"?/);
+    const duration = durationMatch ? parseInt(durationMatch[1]) : 0;
+
+    if (!videoUrl) throw new Error('xHamster video URL çıkarılamadı');
+
+    return { title: cleanTitle, videoUrl, duration, site: 'xhamster' };
+}
+
+// REDTUBE / YOUPORN / TUBE8 (Aylo altyapısı)
+async function scrapeRedtube(url) {
+    const { data: html } = await axios.get(url, { headers: HEADERS, timeout: 12000 });
+
+    const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
+    const cleanTitle = title.replace(/ - RedTube| - YouPorn| - Tube8/gi, '').trim();
+
+    let videoUrl = null;
+
+    // mediaDefinition JSON
+    const mediaMatch = html.match(/mediaDefinition[s]?\s*[=:]\s*(\[[\s\S]*?\])/);
+    if (mediaMatch) {
+        try {
+            const defs = JSON.parse(mediaMatch[1]);
+            const mp4s = defs
+                .filter(d => d.format === 'mp4' && d.videoUrl)
+                .sort((a, b) => (b.quality || 0) - (a.quality || 0));
+            if (mp4s.length > 0) videoUrl = mp4s[0].videoUrl;
+        } catch {}
+    }
+
+    // Yedek: basit mp4 regex
+    if (!videoUrl) {
+        const mp4Match = html.match(/"videoUrl"\s*:\s*"(https?:[^"]+\.mp4[^"]*)"/);
+        if (mp4Match) videoUrl = mp4Match[1].replace(/\\\//g, '/');
+    }
+
+    const durationMatch = html.match(/"duration"\s*:\s*"?(\d+)"?/);
+    const duration = durationMatch ? parseInt(durationMatch[1]) : 0;
+
+    if (!videoUrl) throw new Error('Video URL çıkarılamadı');
+
+    return { title: cleanTitle, videoUrl, duration, site: 'redtube' };
+}
+
+// SPANKBANG
+async function scrapeSpankbang(url) {
+    const { data: html } = await axios.get(url, { headers: HEADERS, timeout: 12000 });
+
+    const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
+    const cleanTitle = title.replace(/ - SpankBang/gi, '').trim();
+
+    // stream_data JSON'dan
+    let videoUrl = null;
+    const streamMatch = html.match(/stream_data\s*=\s*(\{[^}]+\})/);
+    if (streamMatch) {
+        try {
+            const streams = JSON.parse(streamMatch[1]);
+            videoUrl = streams['720p'] || streams['480p'] || streams['240p'] || Object.values(streams).find(v => typeof v === 'string' && v.startsWith('http'));
+        } catch {}
+    }
+    if (!videoUrl) {
+        const mp4Match = html.match(/(https?:\/\/[^\s"']+\.mp4[^\s"']*)/i);
+        if (mp4Match) videoUrl = mp4Match[1];
+    }
+
+    if (!videoUrl) throw new Error('SpankBang video URL çıkarılamadı');
+    return { title: cleanTitle, videoUrl, duration: 0, site: 'spankbang' };
+}
+
+// EPORNER
+async function scrapeEporner(url) {
+    const { data: html } = await axios.get(url, { headers: HEADERS, timeout: 12000 });
+    const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
+    const cleanTitle = title.replace(/ - EPORNER/gi, '').trim();
+
+    let videoUrl = null;
+    // EP video sourcelari genelde script'te JSON olarak bulunur
+    const srcMatch = html.match(/"src"\s*:\s*"(https?:[^"]+\.mp4[^"]*)"/);
+    if (srcMatch) videoUrl = srcMatch[1].replace(/\\\//g, '/');
+
+    if (!videoUrl) {
+        const mp4Match = html.match(/(https?:\/\/[^\s"']+\.mp4[^\s"']*)/i);
+        if (mp4Match) videoUrl = mp4Match[1];
+    }
+
+    if (!videoUrl) throw new Error('Eporner video URL çıkarılamadı');
+    return { title: cleanTitle, videoUrl, duration: 0, site: 'eporner' };
+}
+
+// ── Ana scraper yönlendirici ─────────────────────────────────────────────────
+async function scrapeVideo(url) {
+    const site = detectSite(url);
+    if (!site) throw new Error('Desteklenmeyen site');
+
+    switch (site) {
+        case 'xvideos': case 'xnxx': return scrapeXvideos(url);
+        case 'pornhub': return scrapePornhub(url);
+        case 'xhamster': return scrapeXhamster(url);
+        case 'redtube': case 'youporn': case 'tube8': return scrapeRedtube(url);
+        case 'spankbang': return scrapeSpankbang(url);
+        case 'eporner': return scrapeEporner(url);
+        default: throw new Error(`${site} için scraper henüz yok`);
+    }
+}
+
+// ── Doğrudan axios ile video indir (stream) ──────────────────────────────────
+async function downloadVideo(videoUrl, outputPath) {
+    const response = await axios({
+        method: 'GET',
+        url: videoUrl,
+        responseType: 'stream',
+        timeout: 120000, // 2 dk indirme süresi
+        headers: {
+            ...HEADERS,
+            'Referer': new URL(videoUrl).origin,
+        }
+    });
+
+    const totalBytes = parseInt(response.headers['content-length'] || '0');
+    const writer = fs.createWriteStream(outputPath);
+
+    return new Promise((resolve, reject) => {
+        response.data.pipe(writer);
+        writer.on('finish', () => resolve(totalBytes));
+        writer.on('error', reject);
+        response.data.on('error', reject);
+    });
+}
+
 function formatDuration(seconds) {
-    if (!seconds) return 'Bilinmiyor';
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
+    if (!seconds) return '?';
+    const m = Math.floor(seconds / 60);
     const s = seconds % 60;
-    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept-Language': 'en-US,en;q=0.9'
-};
+// ── Alt komutlar ─────────────────────────────────────────────────────────────
 
-// ── Alt komut: video bilgisi ─────────────────────────────────────────────────
+// Bilgi kartı (indirmeden)
 async function handleInfo(client, msg, url, waitMsg) {
     try {
-        const info = await ytDlp(url, {
-            dumpSingleJson: true,
-            noWarnings: true,
-        });
-
-        const title = info.title || 'Bilinmiyor';
-        const duration = formatDuration(info.duration);
-        const views = info.view_count ? info.view_count.toLocaleString('tr-TR') : 'Bilinmiyor';
-        const likes = info.like_count ? info.like_count.toLocaleString('tr-TR') : 'Bilinmiyor';
-        const uploader = info.uploader || info.channel || 'Bilinmiyor';
-        const uploadDate = info.upload_date
-            ? `${info.upload_date.slice(6, 8)}.${info.upload_date.slice(4, 6)}.${info.upload_date.slice(0, 4)}`
-            : 'Bilinmiyor';
-
-        const estimatedSize = info.filesize || info.filesize_approx || 0;
-
-        const formats = (info.formats || [])
-            .filter(f => f.height && f.ext === 'mp4')
-            .map(f => `${f.height}p`)
-            .filter((v, i, a) => a.indexOf(v) === i)
-            .sort((a, b) => parseInt(b) - parseInt(a))
-            .slice(0, 5);
-
+        const info = await scrapeVideo(url);
         let text = `🔞 *Video Bilgi Kartı*\n\n`;
-        text += `📹 *Başlık:* ${title.substring(0, 80)}${title.length > 80 ? '...' : ''}\n`;
-        text += `⏱️ *Süre:* ${duration}\n`;
-        text += `👁️ *İzlenme:* ${views}\n`;
-        text += `👍 *Beğeni:* ${likes}\n`;
-        text += `👤 *Yükleyen:* ${uploader}\n`;
-        text += `📅 *Tarih:* ${uploadDate}\n`;
-        text += `📦 *Tahmini Boyut:* ${formatSize(estimatedSize)}\n`;
-        if (formats.length > 0) text += `🎬 *Kaliteler:* ${formats.join(', ')}\n`;
-        text += `\n💡 İndirmek için:\n• \`.adult ${url}\`\n• \`.adult ses ${url}\` (sadece ses)`;
-
+        text += `📹 *Başlık:* ${info.title.substring(0, 80)}\n`;
+        text += `⏱️ *Süre:* ${formatDuration(info.duration)}\n`;
+        text += `🌐 *Site:* ${info.site}\n`;
+        text += `\n💡 İndirmek için: \`.adult ${url}\``;
         await waitMsg.edit(text);
     } catch (err) {
-        await waitMsg.edit(`⛔ Video bilgisi alınamadı.\n🔍 Hata: ${err.message.substring(0, 100)}`);
+        await waitMsg.edit(`⛔ Bilgi alınamadı.\n🔍 ${err.message.substring(0, 100)}`);
     }
 }
 
-// ── Alt komut: ses çıkarma ───────────────────────────────────────────────────
-async function handleAudio(client, msg, url, waitMsg) {
-    const timestamp = Date.now();
-    const outputPath = path.join(__dirname, '../../temp', `adult_audio_${timestamp}.mp3`);
-
-    try {
-        const info = await ytDlp(url, { dumpSingleJson: true, noWarnings: true });
-        const title = info.title || 'ses';
-        const duration = formatDuration(info.duration);
-
-        await waitMsg.edit(
-            `🎵 *Ses Çıkarılıyor*\n\n` +
-            `📹 ${title.substring(0, 60)}${title.length > 60 ? '...' : ''}\n` +
-            `⏱️ ${duration}\n\n⏳ FFmpeg ile ses ayrıştırılıyor...`
-        );
-
-        await ytDlp(url, {
-            output: outputPath,
-            extractAudio: true,
-            audioFormat: 'mp3',
-            audioQuality: '192K',
-            noWarnings: true,
-        });
-
-        // yt-dlp bazen farklı isimlendirir
-        let finalPath = outputPath;
-        if (!fs.existsSync(outputPath)) {
-            const tempDir = path.dirname(outputPath);
-            const files = fs.readdirSync(tempDir).filter(f => f.startsWith(`adult_audio_${timestamp}`));
-            if (files.length > 0) finalPath = path.join(tempDir, files[0]);
-            else throw new Error('Ses dosyası diske kaydedilemedi.');
-        }
-
-        const stats = fs.statSync(finalPath);
-        const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
-
-        const media = MessageMedia.fromFilePath(finalPath);
-        await client.sendMessage(msg.from, media, {
-            caption: `🎵 *${title.substring(0, 80)}*\n⏱️ ${duration} | 📦 ${sizeMB} MB`
-        });
-
-        await waitMsg.edit(`✅ *Ses başarıyla çıkarıldı!*\n📦 ${sizeMB} MB MP3`);
-    } catch (err) {
-        console.error('[Adult Audio] Hata:', err.message);
-        await waitMsg.edit(`⛔ Ses çıkarılamadı.\n🔍 ${err.message.substring(0, 100)}`);
-    } finally {
-        cleanUp(outputPath);
-    }
-}
-
-// ── Alt komut: video indirme ─────────────────────────────────────────────────
-async function handleDownload(client, msg, url, quality, waitMsg) {
+// Video indir ve gönder
+async function handleDownload(client, msg, url, waitMsg) {
     const timestamp = Date.now();
     const outputPath = path.join(__dirname, '../../temp', `adult_${timestamp}.mp4`);
 
     try {
-        let videoInfo;
-        try {
-            videoInfo = await ytDlp(url, { dumpSingleJson: true, noWarnings: true });
-        } catch {
-            throw new Error('Video linki geçersiz veya site erişimi engellendi.');
-        }
+        // Aşama 1: Sayfa kazı, video URL'sini bul
+        await waitMsg.edit('🔞 *Video analiz ediliyor...*\n\n🔍 Sayfa kazınıyor, video akışı aranıyor...');
 
-        const title = videoInfo.title || 'video';
-        const duration = formatDuration(videoInfo.duration);
-        const estimatedSize = videoInfo.filesize || videoInfo.filesize_approx || 0;
-
-        if (estimatedSize && estimatedSize > 95 * 1024 * 1024) {
-            return await waitMsg.edit(
-                `⛔ *Video Çok Büyük* (${formatSize(estimatedSize)})\n\n` +
-                `WhatsApp maksimum 95 MB destekler.\n` +
-                `💡 Sadece sesi almak için: \`.adult ses ${url}\``
-            );
-        }
-
-        let formatStr;
-        if (quality === '480') {
-            formatStr = 'bestvideo[ext=mp4][height<=480]+bestaudio[ext=m4a]/best[ext=mp4][height<=480]/best[height<=480]/best';
-        } else if (quality === '1080') {
-            formatStr = 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best';
-        } else {
-            formatStr = 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]/best[height<=720]/best';
-        }
+        const info = await scrapeVideo(url);
 
         await waitMsg.edit(
-            `🔞 *Video İndiriliyor*\n\n` +
-            `📹 ${title.substring(0, 60)}${title.length > 60 ? '...' : ''}\n` +
-            `⏱️ ${duration} | 📦 ~${formatSize(estimatedSize)}\n` +
-            `🎬 Kalite: ${quality || '720'}p\n\n` +
-            `⏳ Sunucu üzerinden akış yakalanıyor...`
+            `🔞 *Video Bulundu — İndiriliyor*\n\n` +
+            `📹 *${info.title.substring(0, 55)}${info.title.length > 55 ? '...' : ''}*\n` +
+            `⏱️ Süre: ${formatDuration(info.duration)}\n` +
+            `🌐 ${info.site}\n\n` +
+            `⏳ Doğrudan akış indiriliyor...`
         );
 
-        await ytDlp(url, {
-            output: outputPath,
-            format: formatStr,
-            noWarnings: true,
-            mergeOutputFormat: 'mp4'
-        });
+        // Aşama 2: Video dosyasını doğrudan indir
+        await downloadVideo(info.videoUrl, outputPath);
 
         if (!fs.existsSync(outputPath)) throw new Error('Dosya diske kaydedilemedi.');
 
         const stats = fs.statSync(outputPath);
-        const actualSizeMB = stats.size / (1024 * 1024);
-        const media = MessageMedia.fromFilePath(outputPath);
-        const caption = `🔞 *${title.substring(0, 80)}${title.length > 80 ? '...' : ''}*\n⏱️ ${duration} | 📦 ${actualSizeMB.toFixed(1)} MB`;
+        const sizeMB = stats.size / (1024 * 1024);
 
-        if (actualSizeMB > 15) {
+        if (sizeMB > 95) {
+            return await waitMsg.edit(
+                `⛔ *Video çok büyük* (${sizeMB.toFixed(1)} MB)\n` +
+                `WhatsApp max 95 MB destekler.`
+            );
+        }
+
+        // Aşama 3: WhatsApp'a gönder
+        await waitMsg.edit(`📤 *WhatsApp'a aktarılıyor...* (${sizeMB.toFixed(1)} MB)`);
+
+        const media = MessageMedia.fromFilePath(outputPath);
+        const caption = `🔞 *${info.title.substring(0, 80)}*\n⏱️ ${formatDuration(info.duration)} | 📦 ${sizeMB.toFixed(1)} MB`;
+
+        if (sizeMB > 15) {
             await client.sendMessage(msg.from, media, { sendMediaAsDocument: true, caption });
         } else {
             await client.sendMessage(msg.from, media, { caption });
         }
 
-        await waitMsg.edit(
-            `✅ *Video Aktarıldı!*\n\n📦 ${actualSizeMB.toFixed(1)} MB | ⏱️ ${duration}`
-        );
+        await waitMsg.edit(`✅ *Video aktarıldı!*\n📦 ${sizeMB.toFixed(1)} MB | ⏱️ ${formatDuration(info.duration)}`);
+
     } catch (err) {
-        console.error('[Adult DL] Hata:', err.message);
+        console.error('[Adult] Hata:', err.message);
         let errMsg = '⛔ *Video indirilemedi.*\n\n';
-        if (err.message.includes('Private') || err.message.includes('premium')) errMsg += '🔒 Video özel veya premium üyelik gerektiriyor.';
-        else if (err.message.includes('geoblocked') || err.message.includes('geo')) errMsg += '🌍 Bölge kısıtlaması nedeniyle erişilemiyor.';
-        else if (err.message.includes('404') || err.message.includes('not found')) errMsg += '❌ Video silinmiş veya URL hatalı.';
-        else errMsg += `🔍 Hata: ${err.message.substring(0, 100)}`;
+        if (err.message.includes('Request failed with status code 403')) errMsg += '🔒 Site erişimi engelliyor (bölge/yaş doğrulama).';
+        else if (err.message.includes('404')) errMsg += '❌ Video silinmiş veya URL hatalı.';
+        else if (err.message.includes('timeout')) errMsg += '⏱️ Bağlantı zaman aşımına uğradı.';
+        else errMsg += `🔍 ${err.message.substring(0, 120)}`;
         await waitMsg.edit(errMsg);
     } finally {
         cleanUp(outputPath);
     }
 }
 
-// ── Alt komut: arama (web scraping — yt-dlp search desteği kaldırıldı) ───────
+// Ses çıkarma (FFmpeg ile)
+async function handleAudio(client, msg, url, waitMsg) {
+    const timestamp = Date.now();
+    const videoPath = path.join(__dirname, '../../temp', `adult_v_${timestamp}.mp4`);
+    const audioPath = path.join(__dirname, '../../temp', `adult_a_${timestamp}.mp3`);
+
+    try {
+        await waitMsg.edit('🎵 *Ses çıkarılıyor...*\n\n🔍 Video indiriliyor...');
+
+        const info = await scrapeVideo(url);
+        await downloadVideo(info.videoUrl, videoPath);
+
+        if (!fs.existsSync(videoPath)) throw new Error('Video indirilemedi.');
+
+        await waitMsg.edit('🎵 *FFmpeg ile ses ayrıştırılıyor...*');
+
+        // FFmpeg ile ses çıkar
+        const ffmpeg = require('fluent-ffmpeg');
+        await new Promise((resolve, reject) => {
+            ffmpeg(videoPath)
+                .noVideo()
+                .audioCodec('libmp3lame')
+                .audioBitrate('192k')
+                .output(audioPath)
+                .on('end', resolve)
+                .on('error', reject)
+                .run();
+        });
+
+        const stats = fs.statSync(audioPath);
+        const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
+
+        const media = MessageMedia.fromFilePath(audioPath);
+        await client.sendMessage(msg.from, media, {
+            caption: `🎵 *${info.title.substring(0, 80)}*\n📦 ${sizeMB} MB`
+        });
+        await waitMsg.edit(`✅ *Ses çıkarıldı!* 📦 ${sizeMB} MB`);
+    } catch (err) {
+        console.error('[Adult Audio] Hata:', err.message);
+        await waitMsg.edit(`⛔ Ses çıkarılamadı.\n🔍 ${err.message.substring(0, 100)}`);
+    } finally {
+        cleanUp(videoPath);
+        cleanUp(audioPath);
+    }
+}
+
+// Arama (web scraping)
 async function handleSearch(client, msg, args, waitMsg) {
     const SEARCH_SITES = {
-        'xvideos': { url: 'https://www.xvideos.com/?k=', baseUrl: 'https://www.xvideos.com' },
-        'xnxx': { url: 'https://www.xnxx.com/search/', baseUrl: 'https://www.xnxx.com' },
+        'xvideos': { url: 'https://www.xvideos.com/?k=', base: 'https://www.xvideos.com' },
+        'xnxx': { url: 'https://www.xnxx.com/search/', base: 'https://www.xnxx.com' },
     };
 
     const site = args[0] && SEARCH_SITES[args[0].toLowerCase()] ? args[0].toLowerCase() : null;
     const query = site ? args.slice(1).join(' ') : args.join(' ');
     const selectedSite = site || 'xvideos';
-    const siteConfig = SEARCH_SITES[selectedSite];
+    const cfg = SEARCH_SITES[selectedSite];
 
     if (!query) {
         return await waitMsg.edit(
-            '🔍 *Yetişkin Video Arama*\n\n' +
-            'Kullanım: `.adult ara [arama terimi]`\n\n' +
-            'Örnek:\n' +
-            '• `.adult ara türk`\n' +
-            '• `.adult ara xvideos amateur`\n' +
-            '• `.adult ara xnxx popular`\n\n' +
-            `📌 Desteklenen arama siteleri: ${Object.keys(SEARCH_SITES).join(', ')}`
+            '🔍 *Video Arama*\n\n' +
+            'Kullanım: `.adult ara [arama]`\n' +
+            '`.adult ara xnxx [arama]`\n\n' +
+            'Örnek: `.adult ara türk`'
         );
     }
 
     try {
-        await waitMsg.edit(`🔍 "${query}" aranıyor (${selectedSite})...\n⏳ Sonuçlar kazınıyor...`);
+        await waitMsg.edit(`🔍 "${query}" aranıyor (${selectedSite})...`);
 
-        const searchUrl = `${siteConfig.url}${encodeURIComponent(query)}`;
-
-        const res = await axios.get(searchUrl, {
-            headers: HEADERS,
-            timeout: 12000
+        const { data: html } = await axios.get(`${cfg.url}${encodeURIComponent(query)}`, {
+            headers: HEADERS, timeout: 12000
         });
 
-        const $ = cheerio.load(res.data);
+        const $ = cheerio.load(html);
         const results = [];
 
-        if (selectedSite === 'xvideos') {
-            // xvideos arama sonuçları
-            $('.mozaique .thumb-block').each((i, el) => {
-                if (results.length >= 5) return false;
-                const titleEl = $(el).find('.thumb-under .title a');
-                const durationEl = $(el).find('.duration');
-                const title = titleEl.attr('title') || titleEl.text().trim();
-                let href = titleEl.attr('href') || '';
-                if (href && !href.startsWith('http')) href = siteConfig.baseUrl + href;
-                const duration = durationEl.text().trim();
-
-                if (title && href) {
-                    results.push({ title, url: href, duration: duration || '?' });
-                }
-            });
-        } else if (selectedSite === 'xnxx') {
-            // xnxx arama sonuçları
-            $('.mozaique .thumb-block').each((i, el) => {
-                if (results.length >= 5) return false;
-                const titleEl = $(el).find('.thumb-under p a');
-                const durationEl = $(el).find('.metadata .duration, .thumb-under .metadata');
-                const title = titleEl.attr('title') || titleEl.text().trim();
-                let href = titleEl.attr('href') || '';
-                if (href && !href.startsWith('http')) href = siteConfig.baseUrl + href;
-                const duration = durationEl.text().trim();
-
-                if (title && href) {
-                    results.push({ title, url: href, duration: duration || '?' });
-                }
-            });
-        }
-
-        if (results.length === 0) {
-            return await waitMsg.edit(
-                `🔍 "${query}" için sonuç bulunamadı.\n\n` +
-                `💡 Farklı arama terimi veya site deneyin.`
-            );
-        }
-
-        let text = `🔍 *Arama: "${query.substring(0, 40)}"*\n`;
-        text += `📌 Site: ${selectedSite} | ${results.length} sonuç\n\n`;
-
-        results.forEach((r, i) => {
-            text += `*${i + 1}.* ${r.title.substring(0, 55)}${r.title.length > 55 ? '...' : ''}\n`;
-            text += `   ⏱️ ${r.duration}\n`;
-            text += `   🔗 ${r.url}\n\n`;
+        $('.mozaique .thumb-block').each((i, el) => {
+            if (results.length >= 5) return false;
+            const a = $(el).find('.thumb-under .title a, .thumb-under p a');
+            const dur = $(el).find('.duration').text().trim();
+            const title = a.attr('title') || a.text().trim();
+            let href = a.attr('href') || '';
+            if (href && !href.startsWith('http')) href = cfg.base + href;
+            if (title && href) results.push({ title, url: href, duration: dur || '?' });
         });
 
-        text += `💡 İndirmek için: \`.adult [URL]\``;
-        await waitMsg.edit(text);
+        if (results.length === 0) return await waitMsg.edit(`🔍 "${query}" için sonuç bulunamadı.`);
 
+        let text = `🔍 *"${query.substring(0, 35)}"* — ${results.length} sonuç (${selectedSite})\n\n`;
+        results.forEach((r, i) => {
+            text += `*${i + 1}.* ${r.title.substring(0, 55)}${r.title.length > 55 ? '...' : ''}\n`;
+            text += `   ⏱️ ${r.duration} | 🔗 ${r.url}\n\n`;
+        });
+        text += `💡 \`.adult [URL]\` ile indir`;
+        await waitMsg.edit(text);
     } catch (err) {
-        console.error('[Adult Search] Hata:', err.message);
-        await waitMsg.edit(
-            `⛔ Arama başarısız.\n🔍 Hata: ${err.message.substring(0, 100)}\n\n` +
-            `💡 Farklı arama terimi deneyin.`
-        );
+        console.error('[Adult Search]', err.message);
+        await waitMsg.edit(`⛔ Arama başarısız.\n🔍 ${err.message.substring(0, 100)}`);
     }
 }
 
-// ── Ana execute ──────────────────────────────────────────────────────────────
+// ── Ana modül ────────────────────────────────────────────────────────────────
 module.exports = {
     execute: async (client, msg, args) => {
-        const subCmd = args[0] ? args[0].toLowerCase() : '';
+        const sub = args[0] ? args[0].toLowerCase() : '';
 
-        if (!subCmd) {
+        if (!sub) {
             return msg.reply(
                 '🔞 *Yetişkin Araç Kutusu*\n\n' +
                 '*İndirme:*\n' +
-                '• `.adult [URL]` — Video indir (720p)\n' +
-                '• `.adult 480 [URL]` — Düşük kalite (480p)\n' +
-                '• `.adult 1080 [URL]` — Yüksek kalite (1080p)\n\n' +
+                '• `.adult [URL]` — Video indir\n\n' +
                 '*Araçlar:*\n' +
                 '• `.adult bilgi [URL]` — Video bilgi kartı\n' +
-                '• `.adult ses [URL]` — Sadece sesi MP3 olarak indir\n' +
-                '• `.adult ara [arama]` — Video arama (xvideos)\n' +
+                '• `.adult ses [URL]` — Sadece ses (MP3)\n' +
+                '• `.adult ara [arama]` — Video arama\n' +
                 '• `.adult ara xnxx [arama]` — xnxx\'te ara\n\n' +
-                '*📌 Desteklenen Siteler:*\n' +
-                SUPPORTED_SITES.slice(0, 10).map(s => `• ${s}.com`).join('\n') +
-                `\n• ...ve ${SUPPORTED_SITES.length - 10} daha`
+                '*📌 Desteklenen:*\n' +
+                SUPPORTED_SITES.map(s => `• ${s}`).join('\n')
             );
         }
 
-        // .adult bilgi [url]
-        if (subCmd === 'bilgi' || subCmd === 'info') {
+        if (sub === 'bilgi' || sub === 'info') {
             const url = args[1];
-            if (!url || !isAdultUrl(url)) {
-                return msg.reply('Lütfen geçerli bir URL girin.\nÖrnek: `.adult bilgi https://xvideos.com/video...`');
-            }
-            const waitMsg = await msg.reply('🔍 Video bilgisi çekiliyor...');
-            return handleInfo(client, msg, url, waitMsg);
+            if (!url || !detectSite(url)) return msg.reply('Lütfen desteklenen bir URL girin.\nÖrnek: `.adult bilgi https://xvideos.com/...`');
+            const w = await msg.reply('🔍 Bilgi çekiliyor...');
+            return handleInfo(client, msg, url, w);
         }
 
-        // .adult ses [url]
-        if (subCmd === 'ses' || subCmd === 'audio' || subCmd === 'mp3') {
+        if (sub === 'ses' || sub === 'audio' || sub === 'mp3') {
             const url = args[1];
-            if (!url || !isAdultUrl(url)) {
-                return msg.reply('Lütfen geçerli bir URL girin.\nÖrnek: `.adult ses https://xvideos.com/video...`');
-            }
-            const waitMsg = await msg.reply('🎵 Ses çıkarma başlatıldı...');
-            return handleAudio(client, msg, url, waitMsg);
+            if (!url || !detectSite(url)) return msg.reply('Lütfen desteklenen bir URL girin.\nÖrnek: `.adult ses https://xvideos.com/...`');
+            const w = await msg.reply('🎵 Başlatılıyor...');
+            return handleAudio(client, msg, url, w);
         }
 
-        // .adult ara [...]
-        if (subCmd === 'ara' || subCmd === 'search') {
-            const waitMsg = await msg.reply('🔍 Arama başlatılıyor...');
-            return handleSearch(client, msg, args.slice(1), waitMsg);
+        if (sub === 'ara' || sub === 'search') {
+            const w = await msg.reply('🔍 Aranıyor...');
+            return handleSearch(client, msg, args.slice(1), w);
         }
 
-        // .adult 480/720/1080 [url]
-        if (['480', '720', '1080'].includes(subCmd)) {
-            const url = args[1];
-            if (!url || !isAdultUrl(url)) {
-                return msg.reply(`Lütfen geçerli bir URL girin.\nÖrnek: \`.adult ${subCmd} https://xvideos.com/video...\``);
-            }
-            const waitMsg = await msg.reply(`🔞 ${subCmd}p kalitede hazırlanıyor...`);
-            return handleDownload(client, msg, url, subCmd, waitMsg);
-        }
-
-        // .adult [url] — direkt indirme
+        // Direkt URL
         const url = args[0];
-        if (url && url.startsWith('http') && isAdultUrl(url)) {
-            const waitMsg = await msg.reply('🔞 Video analiz ediliyor...');
-            return handleDownload(client, msg, url, '720', waitMsg);
+        if (url && url.startsWith('http')) {
+            if (!detectSite(url)) return msg.reply('⛔ Bu site desteklenmiyor.\n💡 `.adult` yazarak listeye bak.');
+            const w = await msg.reply('🔞 Analiz ediliyor...');
+            return handleDownload(client, msg, url, w);
         }
 
-        if (url && url.startsWith('http') && !isAdultUrl(url)) {
-            return msg.reply('⛔ Bu site desteklenmiyor.\n💡 Desteklenen siteler için `.adult` yazın.');
-        }
-
-        msg.reply('❓ Bilinmeyen komut. Kullanım için `.adult` yazın.');
+        msg.reply('❓ Bilinmeyen komut. `.adult` yazarak kullanım kılavuzuna bak.');
     }
 };
