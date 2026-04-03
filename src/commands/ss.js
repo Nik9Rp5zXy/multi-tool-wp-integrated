@@ -34,18 +34,27 @@ function buildUrlCandidates(input) {
     return [...new Set(unique)];
 }
 
-// Belirli bir URL'nin ekran görüntüsünü thum.io'dan çek
+// Belirli bir URL'nin ekran görüntüsünü thum.io'dan çek — sharp ile PNG'ye dönüştür
 async function captureScreenshot(url) {
+    const sharp = require('sharp');
     const captureUrl = `https://image.thum.io/get/width/1080/viewportWidth/1200/noanimate/${url}`;
-    const media = await MessageMedia.fromUrl(captureUrl, { unsafeMime: true });
-    if (!media || !media.data || media.data.length < 100) {
-        throw new Error('Boş veya geçersiz görüntü (site muhtemelen boş sayfa döndürdü)');
+
+    // Ham veriyi axios ile indir (MessageMedia.fromUrl MIME sorunlu)
+    const response = await axios.get(captureUrl, {
+        responseType: 'arraybuffer',
+        timeout: 15000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+
+    if (!response.data || response.data.length < 500) {
+        throw new Error('Boş veya geçersiz görüntü');
     }
-    // MIME'ı her zaman image/png olarak zorla — bazı siteler
-    // yanlış MIME döndürünce WhatsApp dosya olarak gönderiyor
-    media.mimetype = 'image/png';
-    media.filename = 'screenshot.png';
-    return media;
+
+    // sharp ile kesin PNG'ye çevir — WhatsApp her zaman fotoğraf olarak gönderir
+    const pngBuffer = await sharp(Buffer.from(response.data)).png().toBuffer();
+    const base64 = pngBuffer.toString('base64');
+
+    return new MessageMedia('image/png', base64, 'screenshot.png');
 }
 
 // URL'nin erişilebilir olup olmadığını hızlıca kontrol et
