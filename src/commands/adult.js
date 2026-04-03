@@ -54,31 +54,65 @@ async function scrapeXvideos(url) {
     return { title: cleanTitle, videoUrl, duration, site: 'xvideos' };
 }
 
-// PORNHUB
+// PORNHUB — çok katmanlı scraper
 async function scrapePornhub(url) {
-    const { data: html } = await axios.get(url, { headers: { ...HEADERS, Cookie: 'accessAgeDisclaimerPH=1' }, timeout: 12000 });
+    // PH yaş doğrulama ve bölge cookie'leri
+    const phHeaders = {
+        ...HEADERS,
+        'Cookie': 'accessAgeDisclaimerPH=1; accessAgeDisclaimerUK=1; accessPH=1; bs=; ss=; fg_d2151a1f=; platform=pc; age_verified=1',
+        'Referer': 'https://www.pornhub.com/',
+    };
+
+    const { data: html } = await axios.get(url, { headers: phHeaders, timeout: 15000 });
 
     const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
     const cleanTitle = title.replace(/ - Pornhub\.com/gi, '').trim();
 
-    // flashvars veya mediaDefinitions'dan URL çıkar
     let videoUrl = null;
 
-    // Yöntem 1: mediaDefinitions JSON
-    const mediaMatch = html.match(/var\s+flashvars_\d+\s*=\s*(\{[\s\S]*?\});/);
-    if (mediaMatch) {
+    // Yöntem 1: flashvars_ JSON → mediaDefinitions
+    const flashMatch = html.match(/var\s+flashvars_\d+\s*=\s*(\{[\s\S]*?\});\s*\n/);
+    if (flashMatch) {
         try {
-            const flashvars = JSON.parse(mediaMatch[1]);
+            const flashvars = JSON.parse(flashMatch[1]);
             const mediaDefs = flashvars.mediaDefinitions || [];
-            // En yüksek kaliteyi bul (mp4 olanları filtrele, HLS değil)
-            const mp4s = mediaDefs
-                .filter(m => m.format === 'mp4' && m.videoUrl && !m.videoUrl.includes('.m3u8'))
-                .sort((a, b) => (b.quality || 0) - (a.quality || 0));
-            if (mp4s.length > 0) videoUrl = mp4s[0].videoUrl;
-        } catch {}
+
+            // Bazı mediaDefinitions elemanları direkt mp4 URL, bazıları API endpoint
+            for (const def of mediaDefs.sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0))) {
+                if (!def.videoUrl) continue;
+                if (def.videoUrl.includes('.m3u8')) continue; // HLS'i atla
+
+                // Eğer direkt mp4 URL ise kullan
+                if (def.videoUrl.includes('.mp4')) {
+                    videoUrl = def.videoUrl;
+                    break;
+                }
+
+                // API endpoint ise (mp4 içermiyor) — resolve et
+                try {
+                    const apiRes = await axios.get(def.videoUrl, {
+                        headers: phHeaders,
+                        timeout: 8000,
+                        maxRedirects: 5,
+                    });
+                    // API genelde JSON array döndürür
+                    if (Array.isArray(apiRes.data)) {
+                        const mp4s = apiRes.data
+                            .filter(d => d.videoUrl && d.videoUrl.includes('.mp4'))
+                            .sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
+                        if (mp4s.length > 0) { videoUrl = mp4s[0].videoUrl; break; }
+                    } else if (typeof apiRes.data === 'string' && apiRes.data.includes('.mp4')) {
+                        videoUrl = apiRes.data.trim();
+                        break;
+                    }
+                } catch {}
+            }
+        } catch (e) {
+            console.log('[PH Scraper] flashvars parse hatası:', e.message);
+        }
     }
 
-    // Yöntem 2: quality_ değişkenlerinden
+    // Yöntem 2: quality_ değişkenleri
     if (!videoUrl) {
         const q720 = (html.match(/quality_720p\s*=\s*'([^']+)'/i) || [])[1];
         const q480 = (html.match(/quality_480p\s*=\s*'([^']+)'/i) || [])[1];
@@ -86,11 +120,35 @@ async function scrapePornhub(url) {
         videoUrl = q720 || q480 || q240;
     }
 
-    // Süre
+    // Yöntem 3: Generic mp4 URL regex
+    if (!videoUrl) {
+        const mp4Match = html.match(/"(https?:\/\/[^"]+\.mp4[^"]*)"/) ||
+                         html.match(/'(https?:\/\/[^']+\.mp4[^']*)'/);
+        if (mp4Match) videoUrl = mp4Match[1];
+    }
+
+    // Yöntem 4: videoUrl JSON key
+    if (!videoUrl) {
+        const jsonMatch = html.match(/"videoUrl"\s*:\s*"(https?:[^"]+)"/) ||
+                         html.match(/"video_url"\s*:\s*"(https?:[^"]+)"/);
+        if (jsonMatch) videoUrl = jsonMatch[1].replace(/\\\//g, '/');
+    }
+
     const durationMatch = html.match(/"duration"\s*:\s*"?(\d+)"?/);
     const duration = durationMatch ? parseInt(durationMatch[1]) : 0;
 
-    if (!videoUrl) throw new Error('Pornhub video URL çıkarılamadı (giriş/yaş doğrulama engelliyor olabilir)');
+    if (!videoUrl) {
+        // Debug: sayfada ne var?
+        const hasFlashvars = html.includes('flashvars_');
+        const hasMediaDef = html.includes('mediaDefinitions');
+        const hasQuality = html.includes('quality_');
+        const pageLen = html.length;
+        throw new Error(
+            `PH video URL bulunamadı. Sayfa: ${pageLen} byte, ` +
+            `flashvars:${hasFlashvars}, mediaDef:${hasMediaDef}, quality:${hasQuality}. ` +
+            `Site sunucudan erişimi engelliyor olabilir.`
+        );
+    }
 
     return { title: cleanTitle, videoUrl, duration, site: 'pornhub' };
 }
