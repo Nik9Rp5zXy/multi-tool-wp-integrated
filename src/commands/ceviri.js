@@ -1,45 +1,129 @@
 const { translate } = require('@vitalets/google-translate-api');
 
+const TRANSLATE_TIMEOUT = 12000; // 12 saniye timeout
+
+// Timeout wrapper
+function withTimeout(promise, ms) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('TIMEOUT')), ms)
+        )
+    ]);
+}
+
 module.exports = {
     execute: async (client, msg, args) => {
         let textToTranslate = args.join(' ');
+        let targetLang = 'tr'; // Varsayılan hedef: Türkçe
 
-        // Eğer args boşsa ve başka bir mesaja yanıt verilmişse, o mesajı hedef al
+        // Hedef dil argümanı kontrolü: .ceviri en Hello / .ceviri de Merhaba
+        const langCodes = ['en', 'de', 'fr', 'es', 'it', 'ru', 'ar', 'ja', 'ko', 'zh', 'pt', 'nl', 'pl', 'tr'];
+        if (args.length >= 2 && langCodes.includes(args[0].toLowerCase())) {
+            targetLang = args[0].toLowerCase();
+            textToTranslate = args.slice(1).join(' ');
+        }
+
+        // Yanıt verilen mesajdan metin al
         if (!textToTranslate && msg.hasQuotedMsg) {
-            const quoted = await msg.getQuotedMessage();
-            textToTranslate = quoted.body;
+            try {
+                const quoted = await msg.getQuotedMessage();
+                textToTranslate = quoted.body;
+            } catch { /* sesli mesaj veya medya olabilir */ }
         }
 
         if (!textToTranslate) {
-            return msg.reply('Lütfen çevrilecek metni yazın veya çevrilecek bir mesaja yanıt vererek `.ceviri` yazın.\n\n_Örnek: .ceviri Hello world_');
+            return msg.reply(
+                '🌍 *Çeviri*\n\n' +
+                'Kullanım: `.ceviri [metin]`\n' +
+                'Ya da yanıt ver: `.ceviri`\n\n' +
+                '🌐 *Hedef Dil Seçimi:*\n' +
+                '`.ceviri en Merhaba` → İngilizce\n' +
+                '`.ceviri de Merhaba` → Almanca\n' +
+                '`.ceviri fr Merhaba` → Fransızca\n' +
+                '_(Varsayılan:Türkçe)_'
+            );
         }
 
-        const waitMsg = await msg.reply('🔄 Web tabanlı sınırsız çeviri yapılıyor, lütfen bekleyin...');
+        const waitMsg = await msg.reply('🌍 Çeviri yapılıyor...');
 
-        try {
-            // Google Translate web arayüzünü kazıyarak otomatik dili algıla ve Türkçe'ye çevir. (Ücretsiz API gerektirmez)
-            // Eğer asıl metin zaten Türkçe ise, İngilizceye çevir.
-            
-            // Text dilini tespit etmek de translate fonksiyonuyla yapılır. Ama varsayılan 'tr' hedefi sorunsuz çalışır.
-            // Eğer çeviren metin zaten türkçeyse, 'tr' yerine hedefini 'en' yapalım:
-            let targetLang = 'tr';
-            
-            const result = await translate(textToTranslate, { to: targetLang });
-            
-            // Eğer Google zaten metni %100 Tr algıladıysa ve biz de tr'ye çevirip aynı şeyi aldıysak, demek ki İngilizce istiyor.
-            if (result.raw.src === 'tr' && result.text === textToTranslate) {
-                const enResult = await translate(textToTranslate, { to: 'en' });
-                await waitMsg.edit(`🇬🇧 *Çeviri Sonucu (İngilizce):*\n\n${enResult.text}`);
-            } else {
-                await waitMsg.edit((result.raw.src !== 'tr' ? `🇹🇷` : `🌐`) + ` *Çeviri Sonucu (${result.raw.src.toUpperCase()} -> TR):*\n\n${result.text}`);
+        // Yeniden deneme mantığı
+        const MAX_RETRIES = 3;
+        let lastError;
+
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                // İlk deneme: istenilen hedefe çevir
+                const result = await withTimeout(
+                    translate(textToTranslate, { to: targetLang }),
+                    TRANSLATE_TIMEOUT
+                );
+
+                const srcLang = result.raw?.src || '?';
+
+                // Türkçeye çevirme istendi ama metin zaten Türkçeyse → İngilizceye çevir
+                if (targetLang === 'tr' && srcLang === 'tr') {
+                    const enResult = await withTimeout(
+                        translate(textToTranslate, { to: 'en' }),
+                        TRANSLATE_TIMEOUT
+                    );
+                    return await waitMsg.edit(
+                        `🇬🇧 *Çeviri (TR → EN):*\n\n${enResult.text}`
+                    );
+                }
+
+                const flagMap = {
+                    tr: '🇹🇷', en: '🇺🇸', de: '🇩🇪', fr: '🇫🇷',
+                    es: '🇪🇸', it: '🇮🇹', ru: '🇷🇺', ar: '🇸🇦',
+                    ja: '🇯🇵', ko: '🇰🇷', zh: '🇨🇳', pt: '🇵🇹',
+                    nl: '🇳🇱', pl: '🇵🇱'
+                };
+
+                const srcFlag = flagMap[srcLang] || '🌐';
+                const dstFlag = flagMap[targetLang] || '🌐';
+
+                return await waitMsg.edit(
+                    `${srcFlag} → ${dstFlag} *Çeviri (${srcLang.toUpperCase()} → ${targetLang.toUpperCase()}):*\n\n${result.text}`
+                );
+
+            } catch (error) {
+                lastError = error;
+                const isTimeout = error.message === 'TIMEOUT';
+                const isRateLimit = error.message?.includes('429') || error.message?.includes('Too Many');
+
+                if (attempt < MAX_RETRIES) {
+                    const waitTime = isRateLimit ? 3000 : 1500;
+                    if (waitMsg.edit) {
+                        await waitMsg.edit(
+                            `🌍 Çeviri yapılıyor... (Deneme ${attempt + 1}/${MAX_RETRIES}${isTimeout ? ' — Yeniden bağlanıyor' : ''})`
+                        );
+                    }
+                    await new Promise(r => setTimeout(r, waitTime));
+                }
             }
+        }
 
-        } catch (error) {
-            console.error('Çeviri hatası:', error.message);
-            if (waitMsg.edit) {
-               await waitMsg.edit('⛔ Çeviri motoru aşırı isteklere karşı korunuyor olabilir. Lütfen daha sonra tekrar deneyin.');
+        // 3 deneme de başarısız
+        console.error('[Çeviri] Tüm denemeler tükendi:', lastError?.message);
+        const isTimeout = lastError?.message === 'TIMEOUT';
+        const isRateLimit = lastError?.message?.includes('429');
+
+        if (waitMsg.edit) {
+            if (isTimeout) {
+                await waitMsg.edit(
+                    '⛔ *Çeviri zaman aşımına uğradı.*\n\n' +
+                    '💡 Google, sunucunuzdan gelen istekleri yavaşlatıyor olabilir. Birkaç saniye bekleyip tekrar deneyin.'
+                );
+            } else if (isRateLimit) {
+                await waitMsg.edit(
+                    '⛔ *Çeviri limiti aşıldı (Rate Limit).*\n\n' +
+                    '💡 Google, kısa sürede çok fazla istek nedeniyle geçici olarak engelliyor. 1-2 dk bekleyin.'
+                );
             } else {
-               msg.reply('⛔ Çeviri işlemi başarısız oldu.');
+                await waitMsg.edit(
+                    `⛔ *Çeviri başarısız.*\n\n` +
+                    `🔍 Hata: ${lastError?.message?.substring(0, 80) || 'Bilinmeyen hata'}`
+                );
             }
         }
     }

@@ -30,6 +30,10 @@ module.exports = {
 
             `👉 *.ping [URL]*\nSunucu yanıt süresi, SSL durumu, HTTP bilgileri. (Admin)\n\n` +
 
+            `━━━ 🔞 *YETİŞKİN* ━━━\n\n` +
+
+            `👉 *.adult [URL]*\nPornhub, xvideos, xhamster vb. sitelerden video akışını tespit eder ve indirip gönderir. Önce metadata gösterir (boyut, süre), sonra indirir.\n\n` +
+
             `━━━ 🎬 *MEDYA* ━━━\n\n` +
 
             `👉 *.format [uzantı]*\nMedyayı istenen formata çevirir (Mega Converter).\n_Örn: .format mp3 (Videoyu şarkıya çevir) 🔥_\n\n` +
@@ -52,10 +56,16 @@ module.exports = {
 
             `━━━ ⚙️ *SİSTEM* ━━━\n\n` +
 
-            `👉 *.status* — Bot sistem durumu\n` +
-            `👉 *.ban / .unban* — Kullanıcı yasaklama (Owner)\n` +
-            `👉 *.mute / .unmute* — Kullanıcı susturma (Admin)\n` +
-            `👉 *.addadmin / .removeadmin* — Yönetici yönetimi (Owner)`;
+            `👉 *.status* — Bot sistem durumu\n\n` +
+            `👉 *.ban [@kişi / liste]* — Kullanıcı yasaklama. (Owner)\n` +
+            `_Alt komutlar: \`.ban liste\` — yasaklıları göster_\n\n` +
+            `👉 *.unban [@kişi]* — Yasak kaldırma (Owner)\n\n` +
+            `👉 *.mute [@kişi / liste]* — Kullanıcı susturma (Admin)\n` +
+            `_Alt komutlar: \`.mute liste\` — susturulmuşları göster_\n\n` +
+            `👉 *.unmute [@kişi]* — Susturma kaldırma (Admin)\n\n` +
+            `👉 *.addadmin [@kişi / liste / bilgi]* — Admin yönetimi (Owner)\n` +
+            `_Alt komutlar: \`.addadmin liste\` • \`.addadmin bilgi @kişi\`_\n\n` +
+            `👉 *.removeadmin [@kişi]* — Admin yetkisi kaldırma (Owner)`;
 
         return msg.reply(helpText);
     }
