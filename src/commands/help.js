@@ -1,81 +1,90 @@
+const { isOwner, isAdmin } = require('../utils/auth');
+
 module.exports = {
     execute: async (client, msg, args) => {
-        const helpText = `*🤖 WhatsApp Multi-Tool Bot v3.0*\n\n` +
+        const senderId = msg._normalizedUserId || require('../utils/idHelper').getNormalizedId(msg);
+        const userIsOwner = isOwner(senderId);
+        const userIsAdmin = isAdmin(senderId); // admin check includes owner
 
-            `━━━ 🛠️ *ARAÇLAR* ━━━\n\n` +
+        // ── Herkes görebilir ─────────────────────────────────────────────
+        let text = `*🤖 WhatsApp Multi-Tool Bot v3.0*\n\n`;
 
-            `👉 *.qr [metin/URL]*\nMetin veya URL'den anında QR kod resmi üretir. WiFi QR kodu dahil.\n\n` +
+        // Rol badge
+        if (userIsOwner) text += `👑 *Kurucu Paneli* — Tüm komutlar aktif\n\n`;
+        else if (userIsAdmin) text += `🌟 *Admin Paneli* — Genişletilmiş yetkiler\n\n`;
+        else text += `👋 *Kullanıcı Paneli*\n\n`;
 
-            `👉 *.kur [para birimi]*\nAnlık döviz ve kripto (BTC/ETH) kurlarını gösterir. Çevirici: \`.kur 100 usd\`\n\n` +
+        // ━━━ ARAÇLAR (herkes) ━━━
+        text += `━━━ 🛠️ *ARAÇLAR* ━━━\n\n`;
+        text += `*.qr [metin/URL]* — QR kod oluştur\n`;
+        text += `*.kur [para]* — Döviz & kripto kuru\n`;
+        text += `*.hava [şehir]* — Hava durumu + tahmin\n`;
+        text += `*.kisalt [URL]* — URL kısalt\n`;
+        text += `*.sozluk [kelime]* — TDK sözlük\n`;
+        text += `*.hesapla [ifade]* — Hesap makinesi\n`;
+        text += `*.hash [işlem] [metin]* — Hash/Base64/şifre\n`;
+        text += `*.renk [hex/isim]* — Renk bilgi kartı\n`;
+        text += `*.ocr* — Resimdeki yazıyı oku\n`;
+        text += `*.takvim* — Tarih araçları\n\n`;
 
-            `👉 *.hava [şehir]*\nHava durumu + 3 günlük tahmin. Sıcaklık, nem, rüzgar, UV indeksi.\n\n` +
+        // ━━━ MEDYA (herkes) ━━━
+        text += `━━━ 🎬 *MEDYA* ━━━\n\n`;
+        text += `*.sticker* — Resim/videoyu çıkartmaya çevir\n`;
+        text += `*.format [uzantı]* — Medya dönüştürücü\n`;
+        text += `*.document basla/bitir* — Fotoğrafları PDF yap\n\n`;
 
-            `👉 *.kisalt [URL]*\nUzun linki kısa TinyURL linkine dönüştürür.\n\n` +
+        // ━━━ ARAŞTIRMA (herkes) ━━━
+        text += `━━━ 🔍 *ARAŞTIRMA* ━━━\n\n`;
+        text += `*.pdf [arama]* — PDF/kitap avcısı\n`;
+        text += `*.ss [URL]* — Akıllı ekran görüntüsü\n`;
+        text += `*.ceviri [dil] [metin]* — Çeviri (en/de/fr...)\n\n`;
 
-            `👉 *.sozluk [kelime]*\nTDK resmi sözlüğünde kelime arar. Anlam, köken, örnek cümle.\n\n` +
+        // ━━━ YETİŞKİN (herkes) ━━━
+        text += `━━━ 🔞 *YETİŞKİN* ━━━\n\n`;
+        text += `*.adult [URL]* — Video indir (720p)\n`;
+        text += `*.adult 480/1080 [URL]* — Kalite seçerek indir\n`;
+        text += `*.adult bilgi [URL]* — Video bilgi kartı\n`;
+        text += `*.adult ses [URL]* — MP3 olarak indir\n`;
+        text += `*.adult ara [arama]* — Video arama\n\n`;
 
-            `👉 *.hesapla [ifade]*\nGelişmiş hesap makinesi. Yüzde, üslü, trigonometri, birim dönüştürme.\n_Örn: .hesapla 100 cm to inch_\n\n` +
+        // ━━━ ADMİN (sadece admin ve owner) ━━━
+        if (userIsAdmin) {
+            text += `━━━ 📡 *ADMİN ARAÇLARI* ━━━\n\n`;
+            text += `*.whois [domain/IP]* — DNS + IP sorgu\n`;
+            text += `*.ping [URL]* — Sunucu erişim testi\n`;
+            text += `*.download [URL]* — Video indirici\n`;
+            text += `*.transcribe [mod]* — Ses → Metin (AI)\n`;
+            text += `*.mute [@kişi]* — Kullanıcı sustur\n`;
+            text += `*.unmute [@kişi]* — Susturmayı kaldır\n`;
+            text += `*.mute liste* — Susturulmuşları göster\n\n`;
+        }
 
-            `👉 *.hash [işlem] [metin]*\nMD5/SHA256 hash, Base64 encode/decode, güvenli şifre üretici.\n_Örn: .hash sifre 24_\n\n` +
+        // ━━━ OWNER (sadece owner) ━━━
+        if (userIsOwner) {
+            text += `━━━ 👑 *KURUCU PANELİ* ━━━\n\n`;
+            text += `*.ownermode [ac/kapat]* — Botu kilitle\n`;
+            text += `*.ayar* — Bot ayarları (rateLimit, prefix...)\n`;
+            text += `*.ayar [anahtar] [değer]* — Ayar değiştir\n`;
+            text += `*.ayar sifirla hepsi* — Ayarları sıfırla\n`;
+            text += `*.ban [@kişi]* — Kullanıcı yasakla\n`;
+            text += `*.unban [@kişi]* — Yasak kaldır\n`;
+            text += `*.ban liste* — Yasaklıları göster\n`;
+            text += `*.addadmin [@kişi]* — Admin ata\n`;
+            text += `*.removeadmin [@kişi]* — Admin kaldır\n`;
+            text += `*.addadmin liste* — Adminleri göster\n`;
+            text += `*.addadmin bilgi [@kişi]* — Yetki bilgisi\n\n`;
+        }
 
-            `👉 *.renk [hex/isim]*\nRenk önizleme kartı oluşturur. HEX, RGB, HSL bilgisi + zıt renk.\n_Örn: .renk #FF5733 veya .renk kırmızı_\n\n` +
+        // ━━━ GENEL ━━━
+        text += `━━━ ⚙️ *GENEL* ━━━\n\n`;
+        text += `*.status* — Bot durumu\n`;
+        text += `*.help* — Bu menü\n`;
 
-            `👉 *.ocr*\nResme yanıt vererek fotoğraftaki metni AI ile okur/çıkarır. TR+EN.\n\n` +
+        // Alt bilgi
+        if (!userIsAdmin) {
+            text += `\n_💡 Bazı komutlar Admin/Owner yetkisi gerektirir._`;
+        }
 
-            `👉 *.takvim*\nTarih araçları: bugün bilgisi, hicri, geri sayım, epoch çözümleme.\n_Örn: .takvim fark 01.01.2027_\n\n` +
-
-            `━━━ 📡 *AĞAÇLAR (Admin)* ━━━\n\n` +
-
-            `👉 *.whois [domain/IP]*\nDomain DNS kayıtları + IP lokasyon bilgisi sorgulama. (Admin)\n\n` +
-
-            `👉 *.ping [URL]*\nSunucu yanıt süresi, SSL durumu, HTTP bilgileri. (Admin)\n\n` +
-
-            `━━━ 🔞 *YETİŞKİN* ━━━\n\n` +
-
-            `👉 *.adult [URL]* — Video indir (720p)\n` +
-            `👉 *.adult 480/1080 [URL]* — Kalite seçerek indir\n` +
-            `👉 *.adult bilgi [URL]* — Video bilgi kartı (süre, izlenme, kaliteler)\n` +
-            `👉 *.adult ses [URL]* — Sadece sesi MP3 olarak indir\n` +
-            `👉 *.adult ara [arama]* — Video arama\n` +
-            `👉 *.adult ara [site] [arama]* — Belirli sitede ara (xvideos, pornhub, xhamster)\n\n` +
-
-            `━━━ 🎬 *MEDYA* ━━━\n\n` +
-
-            `👉 *.format [uzantı]*\nMedyayı istenen formata çevirir (Mega Converter).\n_Örn: .format mp3 (Videoyu şarkıya çevir) 🔥_\n\n` +
-
-            `👉 *.sticker*\nResim/videoyu çıkartmaya çevirir.\n\n` +
-
-            `👉 *.document basla / bitir*\nFotoğrafları tek bir PDF dosyasında birleştirir.\n\n` +
-
-            `👉 *.download [URL]*\nYouTube, Instagram vb. videoları indirir. (Admin)\n\n` +
-
-            `👉 *.transcribe [hizli/detayli]*\nSes kaydını yapay zeka ile metne döker. (Admin)\n\n` +
-
-            `━━━ 🔍 *ARAŞTIRMA* ━━━\n\n` +
-
-            `👉 *.pdf [arama]*\nPDF döküman/kitap avcısı. İnternetten kazıyarak bulur.\n\n` +
-
-            `👉 *.ss [URL]*\nAkıllı ekran görüntüsü. http/https, www, slash vb. hataları otomatik düzeltir — 8 kombinasyon dener. Tek mesajda canlı deneme logu. 🕵️\n\n` +
-
-            `👉 *.ceviri [metin]*\nOtomatik dil algılamalı Türkçe'ye çeviri.\n\n` +
-
-            `━━━ ⚙️ *SİSTEM* ━━━\n\n` +
-
-            `👉 *.status* — Bot sistem durumu\n\n` +
-            `👉 *.ownermode [ac/kapat]* — Bot\'u sadece kurucuya kilitle (Owner)\n\n` +
-            `👉 *.ayar* — Bot ayarlarını listele ve değiştir (Admin/Owner)\n` +
-            `_Ayarlar: rateLimit, rateLimitWindow, whisperModel, maxDownloadMB, prefix..._\n` +
-            `_Örnek: \`.ayar rateLimit 10\` • \`.ayar whisperModel medium\` • \`.ayar sifirla hepsi\`_\n\n` +
-            `👉 *.ban [@kişi / liste]* — Kullanıcı yasaklama. (Owner)\n` +
-            `_Alt komutlar: \`.ban liste\` — yasaklıları göster_\n\n` +
-            `👉 *.unban [@kişi]* — Yasak kaldırma (Owner)\n\n` +
-            `👉 *.mute [@kişi / liste]* — Kullanıcı susturma (Admin)\n` +
-            `_Alt komutlar: \`.mute liste\` — susturulmuşları göster_\n\n` +
-            `👉 *.unmute [@kişi]* — Susturma kaldırma (Admin)\n\n` +
-            `👉 *.addadmin [@kişi / liste / bilgi]* — Admin yönetimi (Owner)\n` +
-            `_Alt komutlar: \`.addadmin liste\` • \`.addadmin bilgi @kişi\`_\n\n` +
-            `👉 *.removeadmin [@kişi]* — Admin yetkisi kaldırma (Owner)`;
-
-        return msg.reply(helpText);
+        return msg.reply(text);
     }
 };
