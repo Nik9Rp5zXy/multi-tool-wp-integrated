@@ -6,7 +6,7 @@ const { ensureTempDir } = require('./src/utils/garbageCollector');
 const { isRateLimited, getRateLimitInfo } = require('./src/utils/rateLimiter');
 const { resolveUserId, resolveMentionedId } = require('./src/utils/idHelper');
 const { isBanned, isMuted, isOwner, isAdmin } = require('./src/utils/auth');
-const { isOwnerMode, getConfig } = require('./src/utils/dataManager');
+const { isOwnerMode, isSafeMode, getConfig } = require('./src/utils/dataManager');
 require('dotenv').config();
 
 // Ensure the temp directory exists at startup
@@ -81,19 +81,18 @@ client.on('message', async msg => {
 
         // 4. Owner Mode — sadece owner kullanabilir
         if (isOwnerMode() && !isOwner(senderId)) {
-            // Sadece "ownermode" komutunu geçir ki owner kapatabilsin (zaten owner kontrolü var içinde)
-            return msg.reply('🔒 Bot şu anda *sadece Kurucu* tarafından kullanılabilir.\n_(Owner modu aktif)_');
+            return msg.reply('bot şu an kilitli, sadece kurucu kullanabilir');
         }
 
-        // 5. Rate Limiting — Admin ve Owner bypass eder (rateLimiter içinde hallediliyor)
+        // 5. Safe Mode — adult komutu blokla
+        if (isSafeMode() && commandName === 'adult') {
+            return msg.reply('safe mod açık, adult komutları şu an bloklu');
+        }
+
+        // 6. Rate Limiting — Admin ve Owner bypass eder (rateLimiter içinde hallediliyor)
         if (isRateLimited(senderId)) {
             const info = getRateLimitInfo(senderId);
-            return msg.reply(
-                `⏳ *Hız Sınırı Aşıldı*\n\n` +
-                `📊 ${info.used}/${info.max} istek kullanıldı.\n` +
-                `🕐 ${info.resetInSec} saniye sonra sıfırlanacak.\n\n` +
-                `_Admin/Owner için sınır yoktur._`
-            );
+            return msg.reply(`yavaş biraz, ${info.resetInSec} saniye içinde sıfırlanıyor (${info.used}/${info.max})`);
         }
 
         console.log(`[ROUTE] Executing: ${commandName} -> User: ${senderId}${isOwner(senderId) ? ' [OWNER]' : isAdmin(senderId) ? ' [ADMIN]' : ''}`);
@@ -102,7 +101,7 @@ client.on('message', async msg => {
 
     } catch (err) {
         console.error('Error handling message:', err);
-        msg.reply('❌ İşlem sırasında bir hata oluştu.').catch(() => {});
+        msg.reply('bir şeyler ters gitti, tekrar dene').catch(() => {});
     }
 });
 

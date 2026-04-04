@@ -9,6 +9,7 @@ const DEFAULT_DATA = {
     muted: [],
     admins: [],
     ownerMode: false,       // Sadece owner kullanabilir modu
+    safeMode: false,        // Güvenli mod: adult komutları gizlenir/bloklanır
     config: {               // Bot ayarları — .ayar komutuyla değiştirilebilir
         rateLimit: 3,           // Dakikada max istek (kullanıcılar için)
         rateLimitWindow: 60,    // Saniye cinsinden pencere
@@ -76,6 +77,17 @@ function setOwnerMode(active) {
     saveData(data);
 }
 
+function isSafeMode() {
+    const data = loadData();
+    return data.safeMode === true;
+}
+
+function setSafeMode(active) {
+    const data = loadData();
+    data.safeMode = active;
+    saveData(data);
+}
+
 module.exports = {
     loadData,
     saveData,
@@ -83,5 +95,7 @@ module.exports = {
     setConfig,
     isOwnerMode,
     setOwnerMode,
+    isSafeMode,
+    setSafeMode,
     DEFAULT_CONFIG: DEFAULT_DATA.config
 };
