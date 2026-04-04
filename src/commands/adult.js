@@ -332,6 +332,72 @@ async function handleInfo(client, msg, url, waitMsg) {
     }
 }
 
+// Video part'lara böl ve gönder
+async function splitAndSendParts(client, msg, filePath, title, duration, totalMB, waitMsg) {
+    const ffmpeg = require('fluent-ffmpeg');
+    const PART_LIMIT_MB = 90;
+    const partCount = Math.ceil(totalMB / PART_LIMIT_MB);
+    const partDurationSec = Math.floor((duration || 600) / partCount);
+    const timestamp = Date.now();
+    const partPaths = [];
+
+    await waitMsg.edit(
+        `✂️ *Video Bölünüyor*\n\n` +
+        `📦 Toplam: ${totalMB.toFixed(1)} MB\n` +
+        `🔢 ${partCount} parçaya bölünecek (~${PART_LIMIT_MB} MB/part)\n` +
+        `⏳ Lütfen bekleyin...`
+    );
+
+    for (let i = 0; i < partCount; i++) {
+        const startSec = i * partDurationSec;
+        const partPath = path.join(path.dirname(filePath), `adult_part${i + 1}_${timestamp}.mp4`);
+        partPaths.push(partPath);
+
+        await waitMsg.edit(
+            `✂️ *Part ${i + 1}/${partCount} oluşturuluyor...*\n` +
+            `⏱️ ${formatDuration(startSec)} → ${formatDuration(Math.min(startSec + partDurationSec, duration || 999))}`
+        );
+
+        await new Promise((resolve, reject) => {
+            let cmd = ffmpeg(filePath)
+                .seekInput(startSec)
+                .videoCodec('copy')
+                .audioCodec('copy');
+
+            // Son part değilse belirli süreyle kes
+            if (i < partCount - 1) cmd = cmd.duration(partDurationSec);
+
+            cmd.output(partPath)
+                .on('end', resolve)
+                .on('error', reject)
+                .run();
+        });
+
+        if (!fs.existsSync(partPath)) continue;
+
+        const partSizeMB = fs.statSync(partPath).size / (1024 * 1024);
+        const media = MessageMedia.fromFilePath(partPath);
+        const caption =
+            `🔞 *${title.substring(0, 70)}*\n` +
+            `📦 Part ${i + 1}/${partCount} | ${partSizeMB.toFixed(1)} MB`;
+
+        await waitMsg.edit(`📤 *Part ${i + 1}/${partCount} gönderiliyor...* (${partSizeMB.toFixed(1)} MB)`);
+
+        if (partSizeMB > 15) {
+            await client.sendMessage(msg.from, media, { sendMediaAsDocument: true, caption });
+        } else {
+            await client.sendMessage(msg.from, media, { caption });
+        }
+    }
+
+    // Temp part dosyalarını temizle
+    for (const p of partPaths) cleanUp(p);
+
+    await waitMsg.edit(
+        `✅ *${partCount} Part Gönderildi!*\n📦 ${totalMB.toFixed(1)} MB | ⏱️ ${formatDuration(duration)}`
+    );
+}
+
 // Video indir ve gönder
 async function handleDownload(client, msg, url, waitMsg) {
     const timestamp = Date.now();
@@ -359,34 +425,34 @@ async function handleDownload(client, msg, url, waitMsg) {
         const stats = fs.statSync(outputPath);
         const sizeMB = stats.size / (1024 * 1024);
 
-        if (sizeMB > 95) {
-            return await waitMsg.edit(
-                `⛔ *Video çok büyük* (${sizeMB.toFixed(1)} MB)\n` +
-                `WhatsApp max 95 MB destekler.`
+        // Aşama 3: Boyut kontrolü — büyükse part'lara böl
+        if (sizeMB > 90) {
+            await waitMsg.edit(
+                `⚠️ *Video büyük (${sizeMB.toFixed(1)} MB)*\n\n` +
+                `📦 WhatsApp limiti aşıldı, part'lara bölünüyor...`
             );
-        }
-
-        // Aşama 3: WhatsApp'a gönder
-        await waitMsg.edit(`📤 *WhatsApp'a aktarılıyor...* (${sizeMB.toFixed(1)} MB)`);
-
-        const media = MessageMedia.fromFilePath(outputPath);
-        const caption = `🔞 *${info.title.substring(0, 80)}*\n⏱️ ${formatDuration(info.duration)} | 📦 ${sizeMB.toFixed(1)} MB`;
-
-        if (sizeMB > 15) {
-            await client.sendMessage(msg.from, media, { sendMediaAsDocument: true, caption });
+            await splitAndSendParts(client, msg, outputPath, info.title, info.duration, sizeMB, waitMsg);
         } else {
-            await client.sendMessage(msg.from, media, { caption });
-        }
+            // Normal gönder
+            await waitMsg.edit(`📤 *WhatsApp'a aktarılıyor...* (${sizeMB.toFixed(1)} MB)`);
+            const media = MessageMedia.fromFilePath(outputPath);
+            const caption = `🔞 *${info.title.substring(0, 80)}*\n⏱️ ${formatDuration(info.duration)} | 📦 ${sizeMB.toFixed(1)} MB`;
 
-        await waitMsg.edit(`✅ *Video aktarıldı!*\n📦 ${sizeMB.toFixed(1)} MB | ⏱️ ${formatDuration(info.duration)}`);
+            if (sizeMB > 15) {
+                await client.sendMessage(msg.from, media, { sendMediaAsDocument: true, caption });
+            } else {
+                await client.sendMessage(msg.from, media, { caption });
+            }
+            await waitMsg.edit(`✅ *Video aktarıldı!*\n📦 ${sizeMB.toFixed(1)} MB | ⏱️ ${formatDuration(info.duration)}`);
+        }
 
     } catch (err) {
-        console.error('[Adult] Hata:', err.message);
+        console.error('[Adult] Hata:', err.message, err.stack);
         let errMsg = '⛔ *Video indirilemedi.*\n\n';
-        if (err.message.includes('Request failed with status code 403')) errMsg += '🔒 Site erişimi engelliyor (bölge/yaş doğrulama).';
+        if (err.message.includes('403')) errMsg += '🔒 Site erişimi engelliyor (bölge/yaş doğrulama).';
         else if (err.message.includes('404')) errMsg += '❌ Video silinmiş veya URL hatalı.';
-        else if (err.message.includes('timeout')) errMsg += '⏱️ Bağlantı zaman aşımına uğradı.';
-        else errMsg += `🔍 ${err.message.substring(0, 120)}`;
+        else if (err.message.includes('timeout') || err.message.includes('ETIMEDOUT')) errMsg += '⏱️ Bağlantı zaman aşımına uğradı.';
+        else errMsg += `🔍 ${err.message.substring(0, 150)}`;
         await waitMsg.edit(errMsg);
     } finally {
         cleanUp(outputPath);
@@ -439,15 +505,39 @@ async function handleAudio(client, msg, url, waitMsg) {
     }
 }
 
-// Arama (web scraping)
+// Arama (web scraping) — sayfa+randomizasyon destekli
 async function handleSearch(client, msg, args, waitMsg) {
     const SEARCH_SITES = {
-        'xvideos': { url: 'https://www.xvideos.com/?k=', base: 'https://www.xvideos.com' },
-        'xnxx': { url: 'https://www.xnxx.com/search/', base: 'https://www.xnxx.com' },
+        'xvideos': {
+            buildUrl: (q, page) => `https://www.xvideos.com/?k=${encodeURIComponent(q)}&p=${page}`,
+            base: 'https://www.xvideos.com',
+            selector: '.mozaique .thumb-block',
+            titleSel: '.thumb-under .title a',
+            durationSel: '.duration',
+        },
+        'xnxx': {
+            buildUrl: (q, page) => `https://www.xnxx.com/search/${encodeURIComponent(q)}/${page}`,
+            base: 'https://www.xnxx.com',
+            selector: '.mozaique .thumb-block',
+            titleSel: '.thumb-under p a',
+            durationSel: '.metadata',
+        },
     };
 
-    const site = args[0] && SEARCH_SITES[args[0].toLowerCase()] ? args[0].toLowerCase() : null;
-    const query = site ? args.slice(1).join(' ') : args.join(' ');
+    // Args: [site?] [sayfa?] [...arama]
+    let site = null;
+    let pageOverride = null;
+    let queryArgs = args.slice();
+
+    if (queryArgs[0] && SEARCH_SITES[queryArgs[0].toLowerCase()]) {
+        site = queryArgs.shift().toLowerCase();
+    }
+    // Sayfa belirtme: .adult ara 3 türk → 3. sayfa
+    if (queryArgs[0] && /^\d+$/.test(queryArgs[0])) {
+        pageOverride = parseInt(queryArgs.shift());
+    }
+
+    const query = queryArgs.join(' ');
     const selectedSite = site || 'xvideos';
     const cfg = SEARCH_SITES[selectedSite];
 
@@ -455,39 +545,64 @@ async function handleSearch(client, msg, args, waitMsg) {
         return await waitMsg.edit(
             '🔍 *Video Arama*\n\n' +
             'Kullanım: `.adult ara [arama]`\n' +
-            '`.adult ara xnxx [arama]`\n\n' +
-            'Örnek: `.adult ara türk`'
+            'Sayfa: `.adult ara [sayfa] [arama]`\n' +
+            'Site: `.adult ara xnxx [arama]`\n\n' +
+            'Örnekler:\n' +
+            '• `.adult ara türk` — 1. sayfa\n' +
+            '• `.adult ara 3 türk` — 3. sayfa\n' +
+            '• `.adult ara xnxx 2 amateur` — xnxx 2. sayfa'
         );
     }
 
-    try {
-        await waitMsg.edit(`🔍 "${query}" aranıyor (${selectedSite})...`);
+    // Sayfa belirtilmediyse rastgele bir sayfa seç (1-5 arası) — farklı sonuçlar için
+    const page = pageOverride !== null ? pageOverride : Math.floor(Math.random() * 5) + 1;
 
-        const { data: html } = await axios.get(`${cfg.url}${encodeURIComponent(query)}`, {
+    try {
+        await waitMsg.edit(
+            `🔍 *Aranıyor...*\n` +
+            `📌 "${query.substring(0, 40)}" — ${selectedSite}, sayfa ${page}`
+        );
+
+        const searchUrl = cfg.buildUrl(query, page);
+        const { data: html } = await axios.get(searchUrl, {
             headers: HEADERS, timeout: 12000
         });
 
         const $ = cheerio.load(html);
-        const results = [];
+        const allResults = [];
 
-        $('.mozaique .thumb-block').each((i, el) => {
-            if (results.length >= 5) return false;
-            const a = $(el).find('.thumb-under .title a, .thumb-under p a');
-            const dur = $(el).find('.duration').text().trim();
+        // Tüm sonuçları topla
+        $(cfg.selector).each((i, el) => {
+            const a = $(el).find(`${cfg.titleSel}, .thumb-under p a`).first();
+            const dur = $(el).find(cfg.durationSel).first().text().trim();
             const title = a.attr('title') || a.text().trim();
             let href = a.attr('href') || '';
             if (href && !href.startsWith('http')) href = cfg.base + href;
-            if (title && href) results.push({ title, url: href, duration: dur || '?' });
+            if (title && href) allResults.push({ title, url: href, duration: dur || '?' });
         });
 
-        if (results.length === 0) return await waitMsg.edit(`🔍 "${query}" için sonuç bulunamadı.`);
+        if (allResults.length === 0) {
+            return await waitMsg.edit(
+                `🔍 Sayfa ${page}'de "${query}" için sonuç bulunamadı.\n\n` +
+                `💡 Başka bir arama veya sayfa deneyin: \`.adult ara 1 ${query}\``
+            );
+        }
 
-        let text = `🔍 *"${query.substring(0, 35)}"* — ${results.length} sonuç (${selectedSite})\n\n`;
-        results.forEach((r, i) => {
+        // Rastgele 5 tanesi seç (her çağrıda farklı sonuçlar)
+        const shuffled = allResults.sort(() => Math.random() - 0.5).slice(0, 5);
+
+        let text = `🔍 *"${query.substring(0, 35)}"* | ${selectedSite} | Sayfa ${page}\n`;
+        text += `📊 ${allResults.length} sonuçtan 5 rastgele seçildi\n\n`;
+
+        shuffled.forEach((r, i) => {
             text += `*${i + 1}.* ${r.title.substring(0, 55)}${r.title.length > 55 ? '...' : ''}\n`;
             text += `   ⏱️ ${r.duration} | 🔗 ${r.url}\n\n`;
         });
-        text += `💡 \`.adult [URL]\` ile indir`;
+
+        text += `💡 Farklı sonuçlar: \`.adult ara ${query}\`\n`;
+        text += `📄 Sayfa değiştir: \`.adult ara ${page + 1} ${query}\`\n`;
+        text += `⬇️ İndirmek için: \`.adult [URL]\``;
+
         await waitMsg.edit(text);
     } catch (err) {
         console.error('[Adult Search]', err.message);
