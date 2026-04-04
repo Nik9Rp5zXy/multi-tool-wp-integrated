@@ -547,6 +547,34 @@ async function handleSearch(client, msg, args, waitMsg) {
             titleSel: '.thumb-under p a',
             durationSel: '.metadata',
         },
+        'pornhub': {
+            buildUrl: (q, page) => `https://www.pornhub.com/video/search?search=${encodeURIComponent(q)}&page=${page}`,
+            base: 'https://www.pornhub.com',
+            selector: '.pcVideoListItem',
+            titleSel: '.title a',
+            durationSel: '.duration',
+        },
+        'xhamster': {
+            buildUrl: (q, page) => `https://xhamster.com/search/video?q=${encodeURIComponent(q)}&page=${page}`,
+            base: 'https://xhamster.com',
+            selector: '.video-thumb',
+            titleSel: '.video-thumb-info__name',
+            durationSel: '.duration',
+        },
+        'spankbang': {
+            buildUrl: (q, page) => `https://spankbang.com/s/${encodeURIComponent(q)}/${page}/`,
+            base: 'https://spankbang.com',
+            selector: '.video-item',
+            titleSel: '.n',
+            durationSel: '.l',
+        },
+        'eporner': {
+            buildUrl: (q, page) => `https://www.eporner.com/search/${encodeURIComponent(q)}/${page}/`,
+            base: 'https://www.eporner.com',
+            selector: '.mb',
+            titleSel: '.mbtit a',
+            durationSel: '.mbtim',
+        }
     };
 
     // Args: [site?] [sayfa?] [...arama]
@@ -567,15 +595,16 @@ async function handleSearch(client, msg, args, waitMsg) {
     const cfg = SEARCH_SITES[selectedSite];
 
     if (!query) {
-        return await waitMsg.edit(
+        return await safeEdit(waitMsg,
             '🔍 *Video Arama*\n\n' +
-            'Kullanım: `.adult ara [arama]`\n' +
-            'Sayfa: `.adult ara [sayfa] [arama]`\n' +
-            'Site: `.adult ara xnxx [arama]`\n\n' +
-            'Örnekler:\n' +
-            '• `.adult ara türk` — 1. sayfa\n' +
-            '• `.adult ara 3 türk` — 3. sayfa\n' +
-            '• `.adult ara xnxx 2 amateur` — xnxx 2. sayfa'
+            'kullanım: .adult ara [arama]\n' +
+            'sayfa ve site: .adult ara [site] [sayfa] [arama]\n\n' +
+            'desteklenen siteler:\n' +
+            Object.keys(SEARCH_SITES).join(', ') + '\n\n' +
+            'örnekler:\n' +
+            '.adult ara xnxx türk\n' +
+            '.adult ara pornhub 2 stepmom\n' +
+            '.adult ara xhamster amateur'
         );
     }
 
