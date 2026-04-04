@@ -9,6 +9,7 @@ const DEFAULT_DATA = {
     muted: [],
     admins: [],
     ownerMode: false,       // Sadece owner kullanabilir modu
+    ownerModeUntil: null,   // Zamanlanmış kapatma zamanstamp'i
     safeMode: false,        // Güvenli mod: adult komutları gizlenir/bloklanır
     config: {               // Bot ayarları — .ayar komutuyla değiştirilebilir
         rateLimit: 3,           // Dakikada max istek (kullanıcılar için)
@@ -67,13 +68,17 @@ function setConfig(key, value) {
 }
 
 function isOwnerMode() {
-    const data = loadData();
-    return data.ownerMode === true;
+    return loadData().ownerMode === true;
 }
 
-function setOwnerMode(active) {
+function getOwnerModeUntil() {
+    return loadData().ownerModeUntil || null;
+}
+
+function setOwnerMode(status, untilMs = null) {
     const data = loadData();
-    data.ownerMode = active;
+    data.ownerMode = status;
+    data.ownerModeUntil = untilMs;
     saveData(data);
 }
 

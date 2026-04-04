@@ -41,6 +41,22 @@ client.on('qr', (qr) => {
 
 client.on('ready', () => {
     console.log('✅ WhatsApp Bot is ready and connected!');
+
+    // Zamanlanmış Owner Modu kontrolcüsü
+    setInterval(() => {
+        const { isOwnerMode, getOwnerModeUntil, setOwnerMode } = require('./src/utils/dataManager');
+        const currentMode = isOwnerMode();
+        const untilMs = getOwnerModeUntil();
+
+        if (currentMode && untilMs && Date.now() >= untilMs) {
+            setOwnerMode(false, null);
+            const rawOwner = (process.env.OWNER_NUMBER || '905510395152').trim();
+            const ownerJid = rawOwner.includes('@') ? rawOwner : `${rawOwner}@c.us`;
+            
+            client.sendMessage(ownerJid, '⏳ *Süre Doldu*\n\nBot şu an itibarıyla herkesin kullanımına açıldı. (Owner Modu kapandı. 🔓)')
+                .catch(err => console.log('[Scheduler] Owner mesajı gönderilemedi:', err.message));
+        }
+    }, 60000); // Her dakikada bir kontrol et
 });
 
 client.on('message', async msg => {
