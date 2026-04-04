@@ -1,0 +1,19 @@
+{
+    "apps": [
+        {
+            "name": "wp-bot",
+            "script": "index.js",
+            "watch": false,
+            "autorestart": true,
+            "restart_delay": 3000,
+            "max_restarts": 20,
+            "min_uptime": "10s",
+            "env": {
+                "NODE_ENV": "production"
+            },
+            "error_file": "logs/err.log",
+            "out_file": "logs/out.log",
+            "log_date_format": "YYYY-MM-DD HH:mm:ss"
+        }
+    ]
+}

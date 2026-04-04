@@ -70,6 +70,7 @@ module.exports = {
             text += `.safemod [ac/kapat] — adult komutları gizle${safeMode ? ' (şu an AÇIK)' : ''}\n`;
             text += `.ayar — bot ayarları\n`;
             text += `.ayar [anahtar] [değer] — ayar değiştir\n`;
+            text += `.restart — botu yeniden başlat\n`;
             text += `.ban [@kişi] — kullanıcı yasakla\n`;
             text += `.unban [@kişi] — yasak kaldır\n`;
             text += `.ban liste — yasaklıları gör\n`;
