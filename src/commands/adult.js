@@ -45,11 +45,34 @@ function detectSite(url) {
     } catch { return null; }
 }
 
+// ── Proxy Scraping Logic ───────────────────────────────────────────────────
+const HEADER_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+async function smartFetch(url, customHeaders = {}) {
+    const baseHeaders = { 'User-Agent': HEADER_USER_AGENT, 'Referer': new URL(url).origin, ...customHeaders };
+    try {
+        const res = await axios.get(url, { headers: baseHeaders, timeout: 15000 });
+        if (res.data && res.data.length > 500) return res.data;
+    } catch {}
+    try {
+        const proxy1 = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        const res1 = await axios.get(proxy1, { headers: baseHeaders, timeout: 18000 });
+        if (res1.data && res1.data.length > 500) return res1.data;
+    } catch {}
+    try {
+        const proxy2 = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
+        const res2 = await axios.get(proxy2, { headers: baseHeaders, timeout: 18000 });
+        if (res2.data && res2.data.length > 500) return res2.data;
+    } catch (e) {
+        throw new Error('Güvenlik duvarı/Bölge kilidi (Proxy ile de aşılamadı).');
+    }
+}
+
 // ── Site Scraper'ları ────────────────────────────────────────────────────────
 
 // XVIDEOS & XNXX (aynı altyapı)
 async function scrapeXvideos(url) {
-    const { data: html } = await axios.get(url, { headers: HEADERS, timeout: 12000 });
+    const html = await smartFetch(url);
 
     const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
     const cleanTitle = title.replace(/ - XVIDEOS\.COM| - XNXX\.COM/gi, '').trim();
@@ -75,10 +98,9 @@ async function scrapePornhub(url) {
     const phHeaders = {
         ...HEADERS,
         'Cookie': 'accessAgeDisclaimerPH=1; accessAgeDisclaimerUK=1; accessPH=1; bs=; ss=; fg_d2151a1f=; platform=pc; age_verified=1',
-        'Referer': 'https://www.pornhub.com/',
     };
 
-    const { data: html } = await axios.get(url, { headers: phHeaders, timeout: 15000 });
+    const html = await smartFetch(url, phHeaders);
 
     const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
     const cleanTitle = title.replace(/ - Pornhub\.com/gi, '').trim();
@@ -170,7 +192,7 @@ async function scrapePornhub(url) {
 
 // XHAMSTER
 async function scrapeXhamster(url) {
-    const { data: html } = await axios.get(url, { headers: HEADERS, timeout: 12000 });
+    const html = await smartFetch(url);
 
     const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
     const cleanTitle = title.replace(/ - xHamster\.com/gi, '').trim();
@@ -205,7 +227,7 @@ async function scrapeXhamster(url) {
 
 // REDTUBE / YOUPORN / TUBE8 (Aylo altyapısı)
 async function scrapeRedtube(url) {
-    const { data: html } = await axios.get(url, { headers: HEADERS, timeout: 12000 });
+    const html = await smartFetch(url);
 
     const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
     const cleanTitle = title.replace(/ - RedTube| - YouPorn| - Tube8/gi, '').trim();
@@ -240,7 +262,7 @@ async function scrapeRedtube(url) {
 
 // SPANKBANG
 async function scrapeSpankbang(url) {
-    const { data: html } = await axios.get(url, { headers: HEADERS, timeout: 12000 });
+    const html = await smartFetch(url);
 
     const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
     const cleanTitle = title.replace(/ - SpankBang/gi, '').trim();
@@ -265,7 +287,7 @@ async function scrapeSpankbang(url) {
 
 // EPORNER
 async function scrapeEporner(url) {
-    const { data: html } = await axios.get(url, { headers: HEADERS, timeout: 12000 });
+    const html = await smartFetch(url);
     const title = (html.match(/<title>([^<]+)<\/title>/i) || [])[1] || 'Video';
     const cleanTitle = title.replace(/ - EPORNER/gi, '').trim();
 
@@ -299,28 +321,47 @@ async function scrapeVideo(url) {
     }
 }
 
-// ── Doğrudan axios ile video indir (stream) ──────────────────────────────────
-async function downloadVideo(videoUrl, outputPath) {
-    const response = await axios({
-        method: 'GET',
-        url: videoUrl,
-        responseType: 'stream',
-        timeout: 120000, // 2 dk indirme süresi
-        headers: {
-            ...HEADERS,
-            'Referer': new URL(videoUrl).origin,
+// ── Proxy Bypasser İle Video İndirme (Stream) ───────────────────────────────
+async function downloadSafeStream(videoUrl, outputPath, originalUrl) {
+    // 1. Doğrudan video URL'si
+    // 2. Eğer CDN 403 atarsa corsproxy ile atlamaya çalış
+    const downloadUrls = [
+        videoUrl,
+        `https://corsproxy.io/?url=${encodeURIComponent(videoUrl)}`
+    ];
+
+    let lastErr = null;
+    for (let i = 0; i < downloadUrls.length; i++) {
+        const u = downloadUrls[i];
+        try {
+            const response = await axios({
+                method: 'GET',
+                url: u,
+                responseType: 'stream',
+                timeout: 180000, // 3 dk timeout
+                headers: {
+                    'User-Agent': HEADER_USER_AGENT,
+                    'Referer': new URL(originalUrl).origin,
+                }
+            });
+
+            const writer = fs.createWriteStream(outputPath);
+            await new Promise((resolve, reject) => {
+                response.data.pipe(writer);
+                writer.on('finish', resolve);
+                writer.on('error', reject);
+                response.data.on('error', reject);
+            });
+
+            // Başarılı inmiş mi kontrol et
+            const stats = fs.statSync(outputPath);
+            if (stats.size > 50000) return stats.size; // > 50KB ise indirilmiştir
+        } catch (err) {
+            lastErr = err;
+            if (fs.existsSync(outputPath)) cleanUp(outputPath);
         }
-    });
-
-    const totalBytes = parseInt(response.headers['content-length'] || '0');
-    const writer = fs.createWriteStream(outputPath);
-
-    return new Promise((resolve, reject) => {
-        response.data.pipe(writer);
-        writer.on('finish', () => resolve(totalBytes));
-        writer.on('error', reject);
-        response.data.on('error', reject);
-    });
+    }
+    throw lastErr || new Error('Video dosyasına proxy destekli indirme başarısız oldu.');
 }
 
 function formatDuration(seconds) {
@@ -456,7 +497,7 @@ async function handleDownload(client, msg, url, waitMsg) {
             `indiriliyor...`
         );
 
-        await downloadVideo(info.videoUrl, outputPath);
+        await downloadSafeStream(info.videoUrl, outputPath, url);
 
         if (!fs.existsSync(outputPath)) throw new Error('dosya kaydedilemedi');
 
@@ -501,7 +542,7 @@ async function handleAudio(client, msg, url, waitMsg) {
         await safeEdit(waitMsg, 'ses çıkarılıyor... önce video indiriliyor');
 
         const info = await scrapeVideo(url);
-        await downloadVideo(info.videoUrl, videoPath);
+        await downloadSafeStream(info.videoUrl, videoPath, url);
 
         if (!fs.existsSync(videoPath)) throw new Error('video indirilemedi');
 
