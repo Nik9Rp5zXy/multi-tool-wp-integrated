@@ -2,8 +2,23 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const path = require('path');
 const fs = require('fs');
+const { execSync } = require('child_process');
 const { MessageMedia } = require('whatsapp-web.js');
 const { cleanUp } = require('../utils/garbageCollector');
+
+// HTML entity decode (bazı siteler title'da &amp; &comma; gibi döndürüyor)
+function decodeHtml(str) {
+    if (!str) return '';
+    return str
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/&comma;/gi, ',')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&#\d+;/g, c => String.fromCharCode(parseInt(c.slice(2, -1))));
+}
 
 // ── Sabitler ─────────────────────────────────────────────────────────────────
 const HEADERS = {
@@ -353,75 +368,74 @@ async function getVideoDuration(filePath) {
     }
 }
 
-// Video part'lara böl ve gönder (ffmpeg binary direkt)
+// Video part'lara böl ve VIDEO olarak her parçayı gönder
 async function splitAndSendParts(client, msg, filePath, title, totalMB, waitMsg) {
-    const { execSync } = require('child_process');
-    const PART_LIMIT_MB = 85;
+    const PART_LIMIT_MB = 48; // WA'nın inline video sınırı ~50MB güvenli taraf
     const partCount = Math.ceil(totalMB / PART_LIMIT_MB);
     const timestamp = Date.now();
     const partPaths = [];
 
-    // Gerçek süreyi al
-    await safeEdit(waitMsg, `video süresi ölçülüyor...`);
+    // Gerçek süreyi ffprobe ile ölç
+    await safeEdit(waitMsg, `video analiz ediliyor...`);
     const durationSec = await getVideoDuration(filePath);
-
-    // Süre yoksa boyut bazlı böl (her part ~ PART_LIMIT_MB)
-    const partDurationSec = durationSec > 0
-        ? Math.floor(durationSec / partCount)
-        : 0;
+    const partDurationSec = durationSec > 0 ? Math.floor(durationSec / partCount) : 0;
 
     await safeEdit(waitMsg,
         `${totalMB.toFixed(1)} MB — ${partCount} parçaya bölünüyor\n` +
-        (durationSec > 0 ? `süre: ${formatDuration(durationSec)}, part başına ~${formatDuration(partDurationSec)}` : 'süre bilinmiyor, boyut bazlı bölünecek')
+        (durationSec > 0
+            ? `toplam süre: ${formatDuration(durationSec)}, her part ~${formatDuration(partDurationSec)}`
+            : 'süre tespit edilemedi, dosya boyutuna göre bölünecek')
     );
 
     if (durationSec > 0 && partDurationSec > 0) {
-        // Zaman bazlı bölme
+        // Süre bazlı bölme (en güvenilir yöntem)
         for (let i = 0; i < partCount; i++) {
             const startSec = i * partDurationSec;
             const partPath = path.join(path.dirname(filePath), `adult_part${i + 1}_${timestamp}.mp4`);
             partPaths.push(partPath);
 
-            await safeEdit(waitMsg, `part ${i + 1}/${partCount} oluşturuluyor...`);
+            await safeEdit(waitMsg, `part ${i + 1}/${partCount} hazırlanıyor...`);
 
             try {
                 const isLast = i === partCount - 1;
-                const durationArg = isLast ? '' : `-t ${partDurationSec}`;
-                execSync(
-                    `ffmpeg -y -ss ${startSec} -i "${filePath}" ${durationArg} -c copy "${partPath}" -loglevel error`,
-                    { timeout: 120000 }
-                );
+                // -ss önce -i'dan ve keyframe'e atlat, re-encode'suz kesim
+                const cmd = `ffmpeg -y -ss ${startSec} ${isLast ? '' : `-t ${partDurationSec}`} -i "${filePath}" -c copy -avoid_negative_ts make_zero "${partPath}" -loglevel error`;
+                execSync(cmd, { timeout: 180000 });
             } catch (e) {
-                console.error(`[Split] Part ${i + 1} hatası:`, e.message);
-                continue;
+                console.error(`[Split] Part ${i + 1} hatası:`, e.stderr?.toString() || e.message);
+                // Re-encode ile tekrar dene
+                try {
+                    const isLast = i === partCount - 1;
+                    const cmd = `ffmpeg -y -ss ${startSec} ${isLast ? '' : `-t ${partDurationSec}`} -i "${filePath}" -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k "${partPath}" -loglevel error`;
+                    execSync(cmd, { timeout: 300000 });
+                } catch (e2) {
+                    console.error(`[Split] Part ${i + 1} re-encode da başarısız:`, e2.message);
+                    continue;
+                }
             }
 
-            if (!fs.existsSync(partPath) || fs.statSync(partPath).size < 1000) {
-                continue;
-            }
+            if (!fs.existsSync(partPath) || fs.statSync(partPath).size < 1000) continue;
 
             const partSizeMB = fs.statSync(partPath).size / (1024 * 1024);
             const media = MessageMedia.fromFilePath(partPath);
-            const caption =
-                `${title.substring(0, 70)}\n` +
-                `Part ${i + 1}/${partCount} | ${partSizeMB.toFixed(1)} MB`;
+            const caption = `${decodeHtml(title).substring(0, 70)}\nPart ${i + 1}/${partCount} | ${partSizeMB.toFixed(1)} MB`;
 
             await safeEdit(waitMsg, `part ${i + 1}/${partCount} gönderiliyor... (${partSizeMB.toFixed(1)} MB)`);
-            await client.sendMessage(msg.from, media, { sendMediaAsDocument: true, caption });
+
+            // Video olarak gönder (sendMediaAsDocument YOK)
+            await client.sendMessage(msg.from, media, { caption });
         }
     } else {
-        // Süre yoksa hepsi tek seferde dosya olarak gönder (WA limit aşabilir ama deneriz)
+        // Süre tespit edilemedi — teki gönder
         const media = MessageMedia.fromFilePath(filePath);
         await client.sendMessage(msg.from, media, {
-            sendMediaAsDocument: true,
-            caption: `${title.substring(0, 70)} | ${totalMB.toFixed(1)} MB`
+            caption: `${decodeHtml(title).substring(0, 70)} | ${totalMB.toFixed(1)} MB`
         });
     }
 
-    // Temp dosyaları temizle
+    // Temp dosyaların tamamini temizle
     for (const p of partPaths) cleanUp(p);
-
-    await safeEdit(waitMsg, `${partCount} part gönderildi — ${totalMB.toFixed(1)} MB toplam`);
+    await safeEdit(waitMsg, `${partCount} part video olarak gönderildi — ${totalMB.toFixed(1)} MB`);
 }
 
 // Video indir ve gönder
@@ -433,10 +447,11 @@ async function handleDownload(client, msg, url, waitMsg) {
         await safeEdit(waitMsg, 'sayfa kazınıyor, video akışı aranıyor...');
 
         const info = await scrapeVideo(url);
+        const cleanTitle = decodeHtml(info.title);
 
         await safeEdit(waitMsg,
             `bulundu — ${info.site}\n` +
-            `${info.title.substring(0, 60)}\n` +
+            `${cleanTitle.substring(0, 60)}\n` +
             `süre: ${formatDuration(info.duration)}\n\n` +
             `indiriliyor...`
         );
@@ -448,16 +463,19 @@ async function handleDownload(client, msg, url, waitMsg) {
         const stats = fs.statSync(outputPath);
         const sizeMB = stats.size / (1024 * 1024);
 
-        if (sizeMB > 85) {
-            await safeEdit(waitMsg, `${sizeMB.toFixed(1)} MB — whatsapp limiti aşıldı, parçalara bölünüyor...`);
-            await splitAndSendParts(client, msg, outputPath, info.title, sizeMB, waitMsg);
+        // 50 MB üstü → video parçalara bölünecek
+        if (sizeMB > 50) {
+            await safeEdit(waitMsg, `${sizeMB.toFixed(1)} MB — parçalara bölünüyor (50 MB/part)...`);
+            await splitAndSendParts(client, msg, outputPath, cleanTitle, sizeMB, waitMsg);
         } else {
+            // Küçük video — direkt video olarak gönder
             await safeEdit(waitMsg, `gönderiliyor... (${sizeMB.toFixed(1)} MB)`);
             const media = MessageMedia.fromFilePath(outputPath);
-            const caption = `${info.title.substring(0, 80)}\n${formatDuration(info.duration)} | ${sizeMB.toFixed(1)} MB`;
+            const caption = `${cleanTitle.substring(0, 80)}\n${formatDuration(info.duration)} | ${sizeMB.toFixed(1)} MB`;
 
-            await client.sendMessage(msg.from, media, { sendMediaAsDocument: true, caption });
-            await safeEdit(waitMsg, `tamam — ${sizeMB.toFixed(1)} MB gönderildi`);
+            // Video olarak gönder (sendMediaAsDocument YOK = inline video)
+            await client.sendMessage(msg.from, media, { caption });
+            await safeEdit(waitMsg, `tamam — ${sizeMB.toFixed(1)} MB video olarak gönderildi`);
         }
 
     } catch (err) {
@@ -473,46 +491,39 @@ async function handleDownload(client, msg, url, waitMsg) {
     }
 }
 
-// Ses çıkarma (FFmpeg ile)
+// Ses çıkarma (ffmpeg — execSync)
 async function handleAudio(client, msg, url, waitMsg) {
     const timestamp = Date.now();
     const videoPath = path.join(__dirname, '../../temp', `adult_v_${timestamp}.mp4`);
     const audioPath = path.join(__dirname, '../../temp', `adult_a_${timestamp}.mp3`);
 
     try {
-        await waitMsg.edit('🎵 *Ses çıkarılıyor...*\n\n🔍 Video indiriliyor...');
+        await safeEdit(waitMsg, 'ses çıkarılıyor... önce video indiriliyor');
 
         const info = await scrapeVideo(url);
         await downloadVideo(info.videoUrl, videoPath);
 
-        if (!fs.existsSync(videoPath)) throw new Error('Video indirilemedi.');
+        if (!fs.existsSync(videoPath)) throw new Error('video indirilemedi');
 
-        await waitMsg.edit('🎵 *FFmpeg ile ses ayrıştırılıyor...*');
+        await safeEdit(waitMsg, 'ffmpeg ile ses ayrıştırılıyor...');
 
-        // FFmpeg ile ses çıkar
-        const ffmpeg = require('fluent-ffmpeg');
-        await new Promise((resolve, reject) => {
-            ffmpeg(videoPath)
-                .noVideo()
-                .audioCodec('libmp3lame')
-                .audioBitrate('192k')
-                .output(audioPath)
-                .on('end', resolve)
-                .on('error', reject)
-                .run();
-        });
+        execSync(
+            `ffmpeg -y -i "${videoPath}" -vn -codec:a libmp3lame -b:a 192k "${audioPath}" -loglevel error`,
+            { timeout: 120000 }
+        );
 
-        const stats = fs.statSync(audioPath);
-        const sizeMB = (stats.size / (1024 * 1024)).toFixed(1);
+        if (!fs.existsSync(audioPath)) throw new Error('ses dosyası oluşturulamadı');
 
+        const sizeMB = (fs.statSync(audioPath).size / (1024 * 1024)).toFixed(1);
         const media = MessageMedia.fromFilePath(audioPath);
+
         await client.sendMessage(msg.from, media, {
-            caption: `🎵 *${info.title.substring(0, 80)}*\n📦 ${sizeMB} MB`
+            caption: `${decodeHtml(info.title).substring(0, 80)} | ${sizeMB} MB`
         });
-        await waitMsg.edit(`✅ *Ses çıkarıldı!* 📦 ${sizeMB} MB`);
+        await safeEdit(waitMsg, `ses çıkarıldı — ${sizeMB} MB`);
     } catch (err) {
         console.error('[Adult Audio] Hata:', err.message);
-        await waitMsg.edit(`⛔ Ses çıkarılamadı.\n🔍 ${err.message.substring(0, 100)}`);
+        await safeEdit(waitMsg, `ses çıkarılamadı: ${err.message.substring(0, 100)}`);
     } finally {
         cleanUp(videoPath);
         cleanUp(audioPath);
