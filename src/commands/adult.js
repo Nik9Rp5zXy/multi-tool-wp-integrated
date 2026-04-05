@@ -411,7 +411,7 @@ async function getVideoDuration(filePath) {
 
 // Video part'lara böl ve VIDEO olarak her parçayı gönder
 async function splitAndSendParts(client, msg, filePath, title, totalMB, waitMsg) {
-    const PART_LIMIT_MB = 48; // WA'nın inline video sınırı ~50MB güvenli taraf
+    const PART_LIMIT_MB = 38; // WA'nın inline video sınırı için daha güvenli bir boyut (Chrome şişmesini önler)
     const partCount = Math.ceil(totalMB / PART_LIMIT_MB);
     const timestamp = Date.now();
     const partPaths = [];
@@ -463,8 +463,22 @@ async function splitAndSendParts(client, msg, filePath, title, totalMB, waitMsg)
 
             await safeEdit(waitMsg, `part ${i + 1}/${partCount} gönderiliyor... (${partSizeMB.toFixed(1)} MB)`);
 
-            // Video olarak gönder (sendMediaAsDocument YOK)
-            await client.sendMessage(msg.from, media, { caption });
+            // Video gönderimini timeout ile sarmala (WhatsApp Web donmalarını engellemek için)
+            try {
+                await Promise.race([
+                    client.sendMessage(msg.from, media, { caption }),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error('Gönderim zaman aşımı (WhatsApp Web takıldı)')), 180000))
+                ]);
+            } catch (sendErr) {
+                console.error(`[Split] Part ${i + 1} gönderim hatası:`, sendErr.message);
+                await safeEdit(waitMsg, `⚠️ Part ${i + 1} gönderilirken hata oluştu/zaman aşımına uğradı.`);
+            }
+
+            // Chromium'un belleği temizlemesi ve rahatlaması için her part arasında 4 saniye bekle
+            if (!isLast) {
+                await safeEdit(waitMsg, `part ${i + 1} bitti, WA'nın rahatlaması için 5sn bekleniyor...`);
+                await new Promise(r => setTimeout(r, 5000));
+            }
         }
     } else {
         // Süre tespit edilemedi — teki gönder
