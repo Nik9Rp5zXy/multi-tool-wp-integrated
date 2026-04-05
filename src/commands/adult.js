@@ -437,8 +437,9 @@ async function splitAndSendParts(client, msg, filePath, title, totalMB, waitMsg)
 
             await safeEdit(waitMsg, `part ${i + 1}/${partCount} hazırlanıyor...`);
 
+            const isLast = i === partCount - 1;
+
             try {
-                const isLast = i === partCount - 1;
                 // -ss önce -i'dan ve keyframe'e atlat, re-encode'suz kesim
                 const cmd = `ffmpeg -y -ss ${startSec} ${isLast ? '' : `-t ${partDurationSec}`} -i "${filePath}" -c copy -avoid_negative_ts make_zero "${partPath}" -loglevel error`;
                 execSync(cmd, { timeout: 180000 });
@@ -446,7 +447,6 @@ async function splitAndSendParts(client, msg, filePath, title, totalMB, waitMsg)
                 console.error(`[Split] Part ${i + 1} hatası:`, e.stderr?.toString() || e.message);
                 // Re-encode ile tekrar dene
                 try {
-                    const isLast = i === partCount - 1;
                     const cmd = `ffmpeg -y -ss ${startSec} ${isLast ? '' : `-t ${partDurationSec}`} -i "${filePath}" -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k "${partPath}" -loglevel error`;
                     execSync(cmd, { timeout: 300000 });
                 } catch (e2) {
