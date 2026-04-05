@@ -99,6 +99,7 @@ module.exports = {
     getConfig,
     setConfig,
     isOwnerMode,
+    getOwnerModeUntil,
     setOwnerMode,
     isSafeMode,
     setSafeMode,
