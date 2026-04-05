@@ -440,19 +440,14 @@ async function splitAndSendParts(client, msg, filePath, title, totalMB, waitMsg)
             const isLast = i === partCount - 1;
 
             try {
-                // -ss önce -i'dan ve keyframe'e atlat, re-encode'suz kesim
-                const cmd = `ffmpeg -y -ss ${startSec} ${isLast ? '' : `-t ${partDurationSec}`} -i "${filePath}" -c copy -avoid_negative_ts make_zero "${partPath}" -loglevel error`;
-                execSync(cmd, { timeout: 180000 });
+                // WhatsApp Web'in (Chrome) '-c copy' ile kesilmiş eksik frameli mp4'lerde
+                // thumbnail oluştururken takılıp sonsuz döngüye girmemesi için ultrafast re-encode
+                const cmd = `ffmpeg -y -ss ${startSec} -i "${filePath}" ${isLast ? '' : `-t ${partDurationSec}`} -c:v libx264 -preset ultrafast -crf 28 -c:a aac -b:a 128k -avoid_negative_ts make_zero "${partPath}" -loglevel error`;
+                execSync(cmd, { timeout: 240000 }); // 4dk süre (Xeon işlemci genelde 15-20 saniyede bitirir)
             } catch (e) {
                 console.error(`[Split] Part ${i + 1} hatası:`, e.stderr?.toString() || e.message);
-                // Re-encode ile tekrar dene
-                try {
-                    const cmd = `ffmpeg -y -ss ${startSec} ${isLast ? '' : `-t ${partDurationSec}`} -i "${filePath}" -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k "${partPath}" -loglevel error`;
-                    execSync(cmd, { timeout: 300000 });
-                } catch (e2) {
-                    console.error(`[Split] Part ${i + 1} re-encode da başarısız:`, e2.message);
-                    continue;
-                }
+                await safeEdit(waitMsg, `⚠️ Part ${i + 1} kodlanırken (render) hata oluştu.`);
+                continue;
             }
 
             if (!fs.existsSync(partPath) || fs.statSync(partPath).size < 1000) continue;
